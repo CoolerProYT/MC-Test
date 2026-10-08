@@ -1,0 +1,531 @@
+#!/usr/bin/env node
+// MCP server for MCTest: one mc_* tool per method of the MCTest mod's WebSocket API.
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+import { MCTestClient, RemoteError } from './client.js';
+
+const port = Number(process.env.MCTEST_PORT ?? 25599);
+const mc = new MCTestClient(port);
+
+const INSTRUCTIONS = `Drive a running Minecraft (26.x) client like Playwright drives a browser.
+Typical flow: mc_wait_ready -> mc_world_create (flat:true for a clean test world) -> act -> verify -> mc_screenshot when visuals matter.
+- GUI: mc_snapshot lists widgets (stable id "index:Class:text") and container slots; prefer mc_click_widget over raw mc_click. Coordinates are GUI-scaled.
+- Keybind-driven actions (opening the inventory with key "e", chat with "t") take effect on the next client tick: follow with mc_wait_for (e.g. "screen:InventoryScreen").
+- Gameplay: mc_keybind (hold forward/jump/sneak for N ticks), mc_use_on / mc_break_block / mc_use_item / mc_attack_entity / mc_interact_entity act exactly like a player (server-validated reach and permissions).
+- Verify with mc_player, mc_block (reads the integrated server in singleplayer, so block-entity NBT is authoritative), mc_entities, mc_wait_for, mc_logs (exceptions include stacks).
+- mc_command runs any command (worlds made by mc_world_create have cheats on) and returns its chat output.
+- Player skills: mc_goto (pathfinding walk), mc_collect (walk + mine visible blocks with the best tool + pick up drops), mc_dig (staircase down / tunnel), mc_place, mc_fight (melee with proper attack cooldowns), mc_craft (recipe book; opens the inventory or walks to a crafting table), mc_select_item, mc_scan_blocks.
+- For survival play, enable mc_lockstep: the world freezes while you think and only runs while an action is in progress, so mobs can't act between your calls.
+- 20 ticks = 1 second.`;
+
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+const server = new McpServer({ name: 'mctest', version }, { instructions: INSTRUCTIONS });
+
+type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+
+function text(value: unknown): { content: Content[] } {
+  return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }] };
+}
+
+function errorResult(e: unknown) {
+  let message = e instanceof Error ? e.message : String(e);
+  // Unexpected exceptions (not MCTest's own validation errors) are usually what a mod developer needs to see.
+  if (e instanceof RemoteError && e.type && !e.type.endsWith('RpcException') && e.remoteStack) {
+    message += `\n${e.remoteStack.split('\n').slice(0, 25).join('\n')}`;
+  }
+  return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true };
+}
+
+/** Drops undefined values so the mod applies its own defaults. */
+function clean(args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
+}
+
+/**
+ * Registers a tool that forwards its arguments to a mod method. `timeout` derives a client-side timeout from the
+ * arguments (waits measured in ticks can stretch while the game is loading).
+ */
+function tool<S extends z.ZodRawShape>(
+  name: string,
+  method: string,
+  description: string,
+  shape: S,
+  options: {
+    timeout?: (args: z.infer<z.ZodObject<S>>) => number;
+    transform?: (result: any, args: z.infer<z.ZodObject<S>>) => unknown;
+    readOnly?: boolean;
+  } = {},
+) {
+  server.registerTool(
+    name,
+    { description, inputSchema: shape, annotations: { readOnlyHint: options.readOnly ?? false, openWorldHint: false } },
+    (async (args: z.infer<z.ZodObject<S>>) => {
+      try {
+        const result = await mc.call(method, clean(args as Record<string, unknown>), options.timeout?.(args) ?? 60_000);
+        return text(options.transform ? options.transform(result, args) : result);
+      } catch (e) {
+        return errorResult(e);
+      }
+    }) as any,
+  );
+}
+
+const ticksTimeout = (ticks: number | undefined, def: number) => (ticks ?? def) * 50 * 3 + 15_000;
+const xyz = {
+  x: z.number().describe('Block/world X'),
+  y: z.number().describe('Block/world Y'),
+  z: z.number().describe('Block/world Z'),
+};
+const intXyz = {
+  x: z.number().int().describe('Block X'),
+  y: z.number().int().describe('Block Y'),
+  z: z.number().int().describe('Block Z'),
+};
+const face = z.enum(['up', 'down', 'north', 'south', 'east', 'west']).optional().describe('Block face to act on (default up)');
+const hand = z.enum(['main', 'off']).optional().describe('Hand (default main)');
+const modifiers = z
+  .array(z.enum(['shift', 'ctrl', 'alt', 'super']))
+  .optional()
+  .describe('Modifier keys held during the input');
+
+// ---------------------------------------------------------------- status / lifecycle
+
+tool('mc_status', 'status', 'Client state (loading | title | joining | in-world), whether it is ready for input, the open screen, Minecraft/loader versions and the mod list.', {}, {
+  readOnly: true,
+});
+
+server.registerTool(
+  'mc_wait_ready',
+  {
+    description:
+      'Wait until the Minecraft client is running and ready for input (polls mc_status; tolerates the game not having started yet). Call this first after launching the game.',
+    inputSchema: { timeoutSeconds: z.number().positive().optional().describe('Give up after this long (default 300)') },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ timeoutSeconds }) => {
+    const deadline = Date.now() + (timeoutSeconds ?? 300) * 1000;
+    let last = 'not connected';
+    while (Date.now() < deadline) {
+      try {
+        const s = await mc.call('status', {}, 10_000, 1_000);
+        last = `state=${s.state}`;
+        if (s.ready) {
+          return text({ ready: true, state: s.state, screen: s.screen?.simpleName ?? null, minecraft: s.minecraftVersion, loader: `${s.loader} ${s.loaderVersion}` });
+        }
+      } catch (e) {
+        last = (e as Error).message;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return errorResult(new Error(`Client not ready after ${timeoutSeconds ?? 300}s (last: ${last})`));
+  },
+);
+
+tool('mc_world_list', 'world.list', 'List singleplayer worlds (levelId folder, display name, gamemode, cheats, which one is open).', {}, { readOnly: true });
+
+tool(
+  'mc_world_create',
+  'world.create',
+  'Create a new singleplayer world and wait until the player is in it. Leaves (and saves) any open world first. Defaults: creative, cheats on, normal terrain. Use flat:true for a predictable test world (flat grass surface; the player stands on top of it).',
+  {
+    name: z.string().describe('World display name (folder name is derived, made unique)'),
+    seed: z.string().optional().describe('Seed; numeric strings are used as-is, other text is hashed like the Create World screen'),
+    flat: z.boolean().optional().describe('Superflat world (default false)'),
+    gamemode: z.enum(['survival', 'creative', 'adventure', 'spectator', 'hardcore']).optional(),
+    difficulty: z.enum(['peaceful', 'easy', 'normal', 'hard']).optional(),
+    cheats: z.boolean().optional().describe('Allow commands (default true, false for hardcore)'),
+    structures: z.boolean().optional(),
+    bonusChest: z.boolean().optional(),
+    timeoutMs: z.number().int().positive().optional().describe('Max load time (default 120000)'),
+  },
+  { timeout: (a) => (a.timeoutMs ?? 120_000) + 15_000 },
+);
+
+tool(
+  'mc_world_join',
+  'world.join',
+  'Open an existing singleplayer world (by levelId or exact display name) and wait until in-world. Leaves any open world first.',
+  { name: z.string().describe('levelId (folder) or display name'), timeoutMs: z.number().int().positive().optional() },
+  { timeout: (a) => (a.timeoutMs ?? 120_000) + 15_000 },
+);
+
+tool('mc_world_leave', 'world.leave', 'Save and quit to the title screen (like the pause menu). No-op if not in a world.', {}, { timeout: () => 135_000 });
+
+tool('mc_world_delete', 'world.delete', 'Permanently delete a singleplayer world from the game\'s saves folder (not the one currently open).', {
+  name: z.string().describe('levelId (folder) or exact display name'),
+});
+
+// ---------------------------------------------------------------- observation
+
+server.registerTool(
+  'mc_screenshot',
+  {
+    description: 'Capture the game window. Returns the PNG image and the file path (saved under <gameDir>/mctest/screenshots/).',
+    inputSchema: { name: z.string().optional().describe('File name (letters, digits, . _ -); default is a timestamp') },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ name }) => {
+    try {
+      const r = await mc.call('screenshot', clean({ name }));
+      const data = (await readFile(r.path)).toString('base64');
+      return {
+        content: [
+          { type: 'image' as const, data, mimeType: 'image/png' },
+          { type: 'text' as const, text: JSON.stringify(r) },
+        ],
+      };
+    } catch (e) {
+      return errorResult(e);
+    }
+  },
+);
+
+tool(
+  'mc_snapshot',
+  'snapshot',
+  'Inspect the open screen: class/title, every widget (id "index:Class:text", type, text, x/y/w/h in GUI coordinates, active, focused, visible, checkbox/cycle values) and, for container screens, the slots (menu index, item, count, components, x/y) and carried stack. Empty slots are omitted unless includeEmptySlots.',
+  {
+    includeEmptySlots: z.boolean().optional().describe('Include empty container slots (default false)'),
+    includeHidden: z.boolean().optional().describe('Include hidden / scrolled-out widgets (default false)'),
+  },
+  {
+    readOnly: true,
+    transform: (r, a) => {
+      if (!a.includeHidden) r.widgets = r.widgets.filter((w: any) => w.visible);
+      if (r.container && !a.includeEmptySlots) {
+        r.container.emptySlots = r.container.slots.filter((s: any) => !s.item).length;
+        r.container.slots = r.container.slots.filter((s: any) => s.item);
+      }
+      return r;
+    },
+  },
+);
+
+tool(
+  'mc_player',
+  'player',
+  'Local player: position, rotation, velocity, dimension, gamemode, health, food, xp, what the crosshair targets, inventory (slot numbers: 0-8 hotbar, 9-35 main, 36+ armor/offhand), effects and attributes.',
+  {},
+  { readOnly: true },
+);
+
+tool(
+  'mc_block',
+  'block',
+  'Block id, state properties and block-entity NBT at a position. In singleplayer reads the integrated server (authoritative, includes e.g. chest contents); source:"client" reads what the client has.',
+  { ...intXyz, source: z.enum(['auto', 'server', 'client']).optional() },
+  { readOnly: true },
+);
+
+tool(
+  'mc_entities',
+  'entities',
+  'Entities near the player, nearest first: network id (use with attack/interact), uuid, type, name, position, distance, health, item for dropped items.',
+  {
+    radius: z.number().positive().max(256).optional().describe('Search radius in blocks (default 16)'),
+    type: z.string().optional().describe('Entity type id, e.g. "pig" or "mymod:robot"'),
+    limit: z.number().int().positive().optional().describe('Max results (default 50)'),
+  },
+  { readOnly: true },
+);
+
+tool(
+  'mc_logs',
+  'logs',
+  'Game log lines captured since startup (each has seq, level, logger, thread, message; exceptions include the stack). Pass the returned "next" as since to get only new lines.',
+  {
+    since: z.number().int().optional().describe('Only lines with seq > since'),
+    level: z.enum(['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL']).optional().describe('Minimum level'),
+    contains: z.string().optional().describe('Case-insensitive filter on logger/message/exception'),
+    limit: z.number().int().positive().optional().describe('Max lines, newest kept (default 200)'),
+  },
+  { readOnly: true },
+);
+
+tool('mc_tooltip', 'tooltip', 'Tooltip lines of an item. slot = menu slot index (as in mc_snapshot) if a container screen is open, otherwise a player inventory index.', {
+  slot: z.number().int(),
+  advanced: z.boolean().optional().describe('Advanced tooltips (item id, durability, component count)'),
+}, { readOnly: true });
+
+tool('mc_keybinds', 'keybinds', 'All key mappings, including other mods\' (name like "key.forward", category, bound key, whether down).', {}, { readOnly: true });
+
+// ---------------------------------------------------------------- waiting
+
+tool(
+  'mc_wait_for',
+  'waitFor',
+  'Wait until a condition holds, checked every client tick. Conditions: "screen:<Class>" (simple/full/superclass name, or "screen:none"), "slot:<menuIndex>=<item|empty>", "block:<x>,<y>,<z>=<blockId>", "ticks:<n>", "state:<loading|title|joining|in-world>", "log:<text>" (a new log line containing text), "entity:<type>[@radius]". Fails with the last observed value on timeout.',
+  {
+    condition: z.string(),
+    timeoutTicks: z.number().int().positive().optional().describe('Default 100 (5 s)'),
+  },
+  {
+    readOnly: true,
+    timeout: (a) => {
+      const m = /^ticks:(\d+)/.exec(a.condition.trim());
+      return ticksTimeout(Math.max(a.timeoutTicks ?? 100, m ? Number(m[1]) : 0), 100);
+    },
+  },
+);
+
+// ---------------------------------------------------------------- GUI input
+
+tool('mc_click', 'click', 'Click at GUI-scaled coordinates (as reported by mc_snapshot) through the real mouse handler.', {
+  x: z.number(),
+  y: z.number(),
+  button: z.enum(['left', 'right', 'middle']).optional(),
+  modifiers,
+});
+
+tool('mc_click_widget', 'clickWidget', 'Click the centre of a widget from mc_snapshot. An id from an older snapshot still works if its "Class:text" part is unique.', {
+  id: z.string(),
+  button: z.enum(['left', 'right', 'middle']).optional(),
+  modifiers,
+});
+
+tool(
+  'mc_click_slot',
+  'clickSlot',
+  'Click a slot of the open container screen by menu slot index (from mc_snapshot; -999 = outside the window). button 0 = left, 1 = right (for SWAP: hotbar 0-8, 40 = offhand). Returns the predicted slot and cursor stacks.',
+  {
+    index: z.number().int(),
+    button: z.number().int().optional(),
+    clickType: z.enum(['PICKUP', 'QUICK_MOVE', 'SWAP', 'CLONE', 'THROW', 'QUICK_CRAFT', 'PICKUP_ALL']).optional().describe('Default PICKUP; QUICK_MOVE = shift-click'),
+  },
+);
+
+tool(
+  'mc_key',
+  'key',
+  'Press a keyboard key through the real keyboard handler (screens and keybinds react as to a real key). Names: a-z, 0-9, escape, enter, backspace, tab, space, up/down/left/right, f1-f12, left_shift, ... In-world keybinds (e.g. "e" opens the inventory) apply on the next tick.',
+  {
+    key: z.string(),
+    modifiers,
+    action: z.enum(['tap', 'press', 'release']).optional().describe('Default tap (press + release)'),
+  },
+);
+
+tool('mc_type', 'type', 'Type text into the focused widget of the open screen (e.g. an edit box or chat).', { text: z.string() });
+
+tool('mc_scroll', 'scroll', 'Scroll the mouse wheel (positive = up), optionally at GUI coordinates. In-world it changes the hotbar slot.', {
+  amount: z.number(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+});
+
+tool('mc_close_screen', 'closeScreen', 'Close the open screen (like pressing Escape).', {});
+
+// ---------------------------------------------------------------- gameplay
+
+tool(
+  'mc_command',
+  'command',
+  'Run a command as the player (leading "/" optional) and return the chat lines received over the next few ticks.',
+  { command: z.string(), ticks: z.number().int().positive().optional().describe('How long to collect output (default 5)') },
+  { timeout: (a) => ticksTimeout(a.ticks, 5) },
+);
+
+tool('mc_chat', 'chat', 'Send a chat message.', { message: z.string() });
+
+tool(
+  'mc_keybind',
+  'keybind',
+  'Drive a key mapping by name, independent of what key it is bound to; works for other mods\' keybinds too. Names: forward, back, left, right, jump, sneak, sprint, inventory, drop, use, attack, or any "key.*" from mc_keybinds. Actions: tap, press, release, hold (for `ticks`). Walking: hold forward for 20 ticks = about 4.3 blocks.',
+  {
+    name: z.string(),
+    action: z.enum(['tap', 'press', 'release', 'hold']).optional(),
+    ticks: z.number().int().positive().optional().describe('Duration for hold'),
+  },
+  { timeout: (a) => ticksTimeout(a.ticks, 1) },
+);
+
+tool('mc_select_slot', 'selectSlot', 'Select a hotbar slot (0-8).', { slot: z.number().int().min(0).max(8) });
+
+tool('mc_look', 'look', 'Set the player\'s view: yaw (0 = south/+Z, 90 = west, 180 = north, -90 = east) and pitch (-90 up .. 90 down).', {
+  yaw: z.number(),
+  pitch: z.number(),
+});
+
+tool('mc_look_at', 'lookAt', 'Turn the player to look at a point (use block centre: x+0.5, y+0.5, z+0.5).', xyz);
+
+tool('mc_teleport', 'teleport', 'Teleport the player (runs /tp, needs cheats) and wait until the client arrives.', {
+  ...xyz,
+  yaw: z.number().optional(),
+  pitch: z.number().optional(),
+});
+
+tool(
+  'mc_use_on',
+  'useOn',
+  'Right-click a block face with the held item, like a player: places blocks (onto the given face), opens GUIs (chests, machines), uses tools on blocks. The server checks reach (~4.5 blocks).',
+  { ...intXyz, face, hand },
+);
+
+tool(
+  'mc_use_item',
+  'useItem',
+  'Right-click with the held item without targeting a block (throw, eat, drink, draw a bow). With ticks > 0 keeps using for that long (eating takes 32 ticks), then releases.',
+  { hand, ticks: z.number().int().min(0).optional() },
+  { timeout: (a) => ticksTimeout(a.ticks, 0) },
+);
+
+tool(
+  'mc_break_block',
+  'breakBlock',
+  'Mine a block like holding left-click: instant in creative, real dig time in survival (depends on tool). Fails if not broken within timeoutTicks (out of reach, unbreakable, protected).',
+  { ...intXyz, face, timeoutTicks: z.number().int().positive().optional().describe('Default 600') },
+  { timeout: (a) => ticksTimeout(a.timeoutTicks, 600) },
+);
+
+tool('mc_attack_entity', 'attackEntity', 'Left-click (attack) an entity by its id from mc_entities. Must be within reach.', { id: z.number().int() });
+
+tool(
+  'mc_interact_entity',
+  'interactEntity',
+  'Right-click an entity by id from mc_entities (trade with villagers, milk cows, ride, use mod entities).',
+  { id: z.number().int(), hand },
+);
+
+tool('mc_reload_resources', 'reloadResources', 'Reload resource packs (like F3+T); picks up changed textures, models, lang files and so on.', {}, {
+  timeout: () => 180_000,
+});
+
+// ---------------------------------------------------------------- time control (singleplayer)
+
+tool('mc_time_status', 'time.status', 'Whether the world is frozen / in lockstep, and the current game time.', {}, { readOnly: true });
+tool('mc_time_freeze', 'time.freeze', 'Freeze the world (like /tick freeze, but no cheats needed): mobs, blocks, crops, fluids stop; the player can still act.', {});
+tool('mc_time_unfreeze', 'time.unfreeze', 'Unfreeze the world (also turns lockstep off).', {});
+tool(
+  'mc_time_step',
+  'time.step',
+  'Advance a frozen world by exactly N ticks, then wait for it to finish.',
+  { ticks: z.number().int().positive() },
+  { timeout: (a) => ticksTimeout(a.ticks, 1) },
+);
+tool(
+  'mc_lockstep',
+  'time.lockstep',
+  'Lockstep mode: the world stays frozen except while an MCTest action is running (walking, mining, fighting, waiting), so nothing happens while the agent is thinking. Recommended for survival play.',
+  { enabled: z.boolean().optional().describe('Default true') },
+);
+
+// ---------------------------------------------------------------- player skills
+
+tool(
+  'mc_goto',
+  'goto',
+  'Walk to a position (or an entity) like a player: A* pathfinding over loaded terrain, turning, sprinting, jumping up blocks, dropping up to 3 blocks, swimming; replans when stuck. Never teleports. Returns arrived:false with a reason when it cannot get there.',
+  {
+    x: z.number().optional(),
+    y: z.number().optional(),
+    z: z.number().optional(),
+    entity: z.number().int().optional().describe('Entity id to walk to instead of x/y/z'),
+    range: z.number().positive().optional().describe('Arrival distance (default 1, or 2 for an entity)'),
+    sprint: z.boolean().optional().describe('Sprint on straight stretches (default true)'),
+    timeoutTicks: z.number().int().positive().optional().describe('Default 2400 (2 minutes)'),
+  },
+  { timeout: (a) => ticksTimeout(a.timeoutTicks, 2400) },
+);
+
+tool('mc_select_item', 'selectItem', 'Hold an item: selects it on the hotbar, or swaps it in from the main inventory.', {
+  item: z.string().describe('Item id, e.g. "bread" or "mymod:wrench"'),
+});
+
+tool(
+  'mc_scan_blocks',
+  'scanBlocks',
+  'Survey the blocks around the player: per block type the count and nearest position, nearest first. Filter with ids or tags ("#minecraft:logs").',
+  {
+    radius: z.number().int().positive().max(48).optional().describe('Default 16'),
+    blocks: z.array(z.string()).optional().describe('Only these block ids / #tags'),
+    limit: z.number().int().positive().optional().describe('Max block types (default 40)'),
+  },
+  { readOnly: true },
+);
+
+tool(
+  'mc_collect',
+  'collect',
+  'Gather blocks like a player: walk to the nearest matching block, pick the best tool from the inventory, mine it with real dig time, walk over the drop; repeat. Keeps going until `count` blocks have actually been picked up (drops that get away do not count). Returns blocks mined, collected, and the inventory change.',
+  {
+    block: z.string().describe('Block id or #tag, e.g. "#minecraft:logs", "stone", "iron_ore"'),
+    count: z.number().int().positive().optional().describe('Default 1'),
+    radius: z.number().int().positive().max(48).optional().describe('Search radius (default 24)'),
+    timeoutTicks: z.number().int().positive().optional().describe('Default 6000'),
+  },
+  { timeout: (a) => ticksTimeout(a.timeoutTicks, 6000) * 2 },
+);
+
+tool(
+  'mc_fight',
+  'fight',
+  'Melee an entity like a player: equips a sword/axe, closes in, aims, and attacks only when the attack cooldown is full. Target by id, by type, or (neither) the nearest hostile mob.',
+  {
+    id: z.number().int().optional(),
+    type: z.string().optional().describe('Entity type, e.g. "zombie"'),
+    radius: z.number().positive().optional().describe('Search radius when picking by type (default 16)'),
+    fleeHealth: z.number().optional().describe('Stop when your health drops to this (default 0 = never)'),
+    autoWeapon: z.boolean().optional().describe('Equip the best sword/axe first (default true)'),
+    timeoutTicks: z.number().int().positive().optional().describe('Default 600'),
+  },
+  { timeout: (a) => ticksTimeout(a.timeoutTicks, 600) },
+);
+
+tool(
+  'mc_place',
+  'place',
+  'Place a block from the inventory like a player: holds it and right-clicks a face of a solid neighbour (any side). Without a position it picks the nearest free spot around you that is not where you stand.',
+  {
+    item: z.string().describe('Item id of the block to place, e.g. "crafting_table", "torch", "mymod:machine"'),
+    x: z.number().int().optional(),
+    y: z.number().int().optional(),
+    z: z.number().int().optional(),
+  },
+);
+
+tool(
+  'mc_dig',
+  'dig',
+  'Dig like a player: "stairs" goes one block down per step (to reach stone/ores), "up" digs a staircase upward (e.g. out of a hole or a mine), "tunnel" digs a 1x2 corridor forward. Uses the best tool, walks into the gap each step, picks up drops. Stops at lava/water, unbreakable blocks, open drops, or when the `until` block (id or #tag) shows up.',
+  {
+    mode: z.enum(['stairs', 'up', 'tunnel']).optional().describe('Default stairs (down)'),
+    length: z.number().int().positive().max(64).optional().describe('Steps (default 8)'),
+    direction: z.enum(['north', 'south', 'east', 'west']).optional().describe('Default: the way you are facing'),
+    until: z.string().optional().describe('Stop when this block appears, e.g. "stone" or "#minecraft:iron_ores"'),
+  },
+  { timeout: (a) => (a.length ?? 8) * 30_000 + 15_000 },
+);
+
+tool(
+  'mc_craft',
+  'craft',
+  'Craft through the recipe book like a player: 2x2 recipes in the inventory, 3x3 at a crafting table (walks to one within 24 blocks and opens it). Only recipes the player has unlocked (they unlock when you obtain an ingredient).',
+  {
+    item: z.string().describe('Result item id, e.g. "oak_planks", "crafting_table", "wooden_pickaxe"'),
+    times: z.number().int().positive().optional().describe('How many times to craft (default 1)'),
+    keepOpen: z.boolean().optional().describe('Leave the crafting screen open afterwards'),
+  },
+  { timeout: () => 180_000 },
+);
+
+// ---------------------------------------------------------------- escape hatch
+
+server.registerTool(
+  'mc_call',
+  {
+    description: 'Call any MCTest method directly with raw params (for methods without a dedicated tool).',
+    inputSchema: { method: z.string(), params: z.record(z.string(), z.unknown()).optional(), timeoutMs: z.number().int().positive().optional() },
+  },
+  async ({ method, params, timeoutMs }) => {
+    try {
+      return text(await mc.call(method, params ?? {}, timeoutMs ?? 60_000));
+    } catch (e) {
+      return errorResult(e);
+    }
+  },
+);
+
+await server.connect(new StdioServerTransport());
