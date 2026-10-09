@@ -19,7 +19,12 @@ export class MCTestClient {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
 
-  constructor(readonly port: number) {}
+  constructor(
+    readonly port: number,
+    private readonly notReachableHint = 'Minecraft client not reachable at {url} ({error}). ' +
+      'Start it with ./gradlew :fabric:runClient or :neoforge:runClient (with MCTest on the runtime classpath), ' +
+      'then call mc_wait_ready.',
+  ) {}
 
   get url(): string {
     return `ws://127.0.0.1:${this.port}/`;
@@ -54,9 +59,7 @@ export class MCTestClient {
       }
     } while (Date.now() < deadline);
     throw new Error(
-      `Minecraft client not reachable at ${this.url} (${(lastError as Error)?.message ?? lastError}). ` +
-        'Start it with ./gradlew :fabric:runClient or :neoforge:runClient (with MCTest on the runtime classpath), ' +
-        'then call mc_wait_ready.',
+      this.notReachableHint.replace('{url}', this.url).replace('{error}', String((lastError as Error)?.message ?? lastError)),
     );
   }
 
@@ -78,7 +81,7 @@ export class MCTestClient {
         this.connecting = undefined;
         for (const [id, p] of this.pending) {
           clearTimeout(p.timer);
-          p.reject(new Error('Connection to Minecraft closed (did the game exit or crash? check mc_logs after restarting)'));
+          p.reject(new Error('Connection to Minecraft closed: the game exited or crashed (mc_crash_report shows the newest crash report)'));
           this.pending.delete(id);
         }
         if (!opened) reject(new Error('connection closed'));

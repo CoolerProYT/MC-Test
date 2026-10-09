@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // MCP server for MCTest: one mc_* tool per method of the MCTest mod's WebSocket API.
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -9,6 +10,12 @@ import { MCTestClient, RemoteError } from './client.js';
 
 const port = Number(process.env.MCTEST_PORT ?? 25599);
 const mc = new MCTestClient(port);
+const serverPort = Number(process.env.MCTEST_SERVER_PORT ?? 25598);
+const srv = new MCTestClient(
+  serverPort,
+  'Minecraft dedicated server not reachable at {url} ({error}). Start it with ./gradlew :fabric:runServer or ' +
+    ':neoforge:runServer (with MCTest on the runtime classpath), then call mc_server_wait_ready.',
+);
 
 const INSTRUCTIONS = `Drive a running Minecraft (26.x) client like Playwright drives a browser.
 Typical flow: mc_wait_ready -> mc_world_create (flat:true for a clean test world) -> act -> verify -> mc_screenshot when visuals matter.
@@ -19,6 +26,9 @@ Typical flow: mc_wait_ready -> mc_world_create (flat:true for a clean test world
 - mc_command runs any command (worlds made by mc_world_create have cheats on) and returns its chat output.
 - Player skills: mc_goto (pathfinding walk), mc_collect (walk + mine visible blocks with the best tool + pick up drops), mc_dig (staircase down / tunnel), mc_place, mc_fight (melee with proper attack cooldowns), mc_craft (recipe book; opens the inventory or walks to a crafting table), mc_select_item, mc_scan_blocks.
 - For survival play, enable mc_lockstep: the world freezes while you think and only runs while an action is in progress, so mobs can't act between your calls.
+- Dedicated server (multiplayer) tests: start the server (./gradlew :<loader>:runServer) and the client, mc_server_wait_ready + mc_wait_ready, then mc_connect. The mc_server_* tools talk to the server itself: mc_server_command runs console commands (full permissions), mc_server_players / mc_server_block / mc_server_entities show the authoritative server state, mc_server_wait_for waits on server-side conditions, mc_server_logs reads the server log. Client tools keep driving the player. Compare client and server views to catch sync bugs.
+- GameTests: mc_gametest_run {tests:"mymod:*"} runs your mod's GameTests and reports each result (mc_server_gametest_run on a dedicated server).
+- Errors logged by the game are appended to tool results automatically. If the game died, mc_crash_report shows why; mc_quit closes it cleanly.
 - 20 ticks = 1 second.`;
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -36,7 +46,50 @@ function errorResult(e: unknown) {
   if (e instanceof RemoteError && e.type && !e.type.endsWith('RpcException') && e.remoteStack) {
     message += `\n${e.remoteStack.split('\n').slice(0, 25).join('\n')}`;
   }
-  return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true };
+  return { content: [{ type: 'text', text: `Error: ${message}` }] as Content[], isError: true };
+}
+
+/** Game directory per side, remembered from status calls so crash reports can be found after the game is gone. */
+const gameDirs = new Map<MCTestClient, string>();
+/** Newest log sequence number already reported per side. */
+const errorCursor = new Map<MCTestClient, number>();
+
+function remember(client: MCTestClient, result: any) {
+  if (result && typeof result.gameDir === 'string') gameDirs.set(client, result.gameDir);
+}
+
+/**
+ * ERROR lines logged since the previous tool call, so a mod's exceptions surface right after the action that caused
+ * them instead of only when someone thinks to read the log.
+ */
+async function newErrors(client: MCTestClient): Promise<Content[]> {
+  try {
+    const since = errorCursor.get(client) ?? 0;
+    const r = await client.call('logs', { since, level: 'ERROR', limit: 20 }, 3_000, 0);
+    if (r.next < since) {
+      // The game restarted and its sequence numbers began again.
+      errorCursor.set(client, 0);
+      return [];
+    }
+    errorCursor.set(client, r.next);
+    if (!r.lines.length) return [];
+    const side = client === srv ? 'server' : 'client';
+    const shown = r.lines.slice(-5).map((l: any) => `[${l.level}] ${l.logger}: ${l.message}${l.exception ? ` -- ${l.exception}` : ''}`);
+    const more = r.lines.length > 5 ? ` (newest 5 of ${r.lines.length}${r.lines.length === 20 ? '+' : ''})` : '';
+    return [
+      {
+        type: 'text',
+        text: `New ERROR lines in the ${side} log since the previous call${more}; ${side === 'server' ? 'mc_server_logs' : 'mc_logs'} {level:"ERROR"} has the stacks:\n${shown.join('\n')}`,
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+async function withErrors(client: MCTestClient, result: { content: Content[]; isError?: boolean }) {
+  result.content.push(...(await newErrors(client)));
+  return result;
 }
 
 /** Drops undefined values so the mod applies its own defaults. */
@@ -57,18 +110,23 @@ function tool<S extends z.ZodRawShape>(
     timeout?: (args: z.infer<z.ZodObject<S>>) => number;
     transform?: (result: any, args: z.infer<z.ZodObject<S>>) => unknown;
     readOnly?: boolean;
+    client?: MCTestClient;
   } = {},
 ) {
   server.registerTool(
     name,
     { description, inputSchema: shape, annotations: { readOnlyHint: options.readOnly ?? false, openWorldHint: false } },
     (async (args: z.infer<z.ZodObject<S>>) => {
+      const client = options.client ?? mc;
+      let out: { content: Content[]; isError?: boolean };
       try {
-        const result = await mc.call(method, clean(args as Record<string, unknown>), options.timeout?.(args) ?? 60_000);
-        return text(options.transform ? options.transform(result, args) : result);
+        const result = await client.call(method, clean(args as Record<string, unknown>), options.timeout?.(args) ?? 60_000);
+        remember(client, result);
+        out = text(options.transform ? options.transform(result, args) : result);
       } catch (e) {
-        return errorResult(e);
+        out = errorResult(e);
       }
+      return method === 'logs' ? out : withErrors(client, out);
     }) as any,
   );
 }
@@ -111,6 +169,7 @@ server.registerTool(
     while (Date.now() < deadline) {
       try {
         const s = await mc.call('status', {}, 10_000, 1_000);
+        remember(mc, s);
         last = `state=${s.state}`;
         if (s.ready) {
           return text({ ready: true, state: s.state, screen: s.screen?.simpleName ?? null, minecraft: s.minecraftVersion, loader: `${s.loader} ${s.loaderVersion}` });
@@ -148,11 +207,100 @@ tool(
   'mc_world_join',
   'world.join',
   'Open an existing singleplayer world (by levelId or exact display name) and wait until in-world. Leaves any open world first.',
-  { name: z.string().describe('levelId (folder) or display name'), timeoutMs: z.number().int().positive().optional() },
+  {
+    name: z.string().describe('levelId (folder) or display name'),
+    timeoutMs: z.number().int().positive().optional(),
+    confirmPrompts: z
+      .boolean()
+      .optional()
+      .describe('Answer "experimental settings / make a backup?" prompts with "I know what I\'m doing" (default true; a world with datapack registry content always asks)'),
+  },
   { timeout: (a) => (a.timeoutMs ?? 120_000) + 15_000 },
 );
 
-tool('mc_world_leave', 'world.leave', 'Save and quit to the title screen (like the pause menu). No-op if not in a world.', {}, { timeout: () => 135_000 });
+tool('mc_world_leave', 'world.leave', 'Save and quit to the title screen (like the pause menu), or disconnect from a multiplayer server. No-op if not in a world.', {}, { timeout: () => 135_000 });
+
+tool('mc_quit', 'quit', 'Quit the game like "Quit Game" (saves the world first). Use it to restart after rebuilding your mod; the gradle run task then finishes.', {});
+
+server.registerTool(
+  'mc_crash_report',
+  {
+    description:
+      'Read the newest crash report (crash-reports/*.txt, or a JVM hs_err_pid*.log) of the client or the dedicated server: the cause and stack trace when the game died. Works after the game has exited.',
+    inputSchema: {
+      side: z.enum(['client', 'server']).optional().describe('Default client'),
+      gameDir: z.string().optional().describe('Game directory (e.g. <mod>/fabric/runs/client); only needed if MCTest never reported it in this session'),
+      maxLines: z.number().int().positive().optional().describe('Default 150'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ side, gameDir, maxLines }) => {
+    try {
+      const client = side === 'server' ? srv : mc;
+      let dir = gameDir ?? gameDirs.get(client);
+      if (!dir) {
+        const s = await client.call('status', {}, 5_000, 0);
+        remember(client, s);
+        dir = s.gameDir as string;
+      }
+      const candidates: { path: string; mtime: number }[] = [];
+      for (const [folder, match] of [
+        [join(dir, 'crash-reports'), /\.txt$/],
+        [dir, /^hs_err_pid\d+\.log$/],
+      ] as const) {
+        const names = await readdir(folder).catch(() => [] as string[]);
+        for (const n of names.filter((n) => match.test(n))) {
+          const path = join(folder, n);
+          candidates.push({ path, mtime: (await stat(path)).mtimeMs });
+        }
+      }
+      if (!candidates.length) return text({ gameDir: dir, crashReport: null, note: 'No crash reports in this game directory' });
+      candidates.sort((a, b) => b.mtime - a.mtime);
+      const newest = candidates[0];
+      const lines = (await readFile(newest.path, 'utf8')).split(/\r?\n/);
+      const limit = maxLines ?? 150;
+      return text({
+        path: newest.path,
+        written: new Date(newest.mtime).toISOString(),
+        totalLines: lines.length,
+        report: lines.slice(0, limit).join('\n') + (lines.length > limit ? `\n... (${lines.length - limit} more lines in the file)` : ''),
+      });
+    } catch (e) {
+      return errorResult(e);
+    }
+  },
+);
+
+tool(
+  'mc_gametest_list',
+  'gametest.list',
+  'List the GameTests registered in the singleplayer world (vanilla, your mod\'s via the loader GameTest API, and datapack test instances).',
+  { filter: z.string().optional().describe('Substring of the test id, e.g. your mod id') },
+  { readOnly: true },
+);
+
+const gametestRun = {
+  tests: z.string().optional().describe('Test selector, e.g. "mymod:*" or "mymod:grinder_outputs_dust" (default "*:*")'),
+  timeoutSeconds: z.number().positive().optional().describe('Default 300'),
+};
+tool(
+  'mc_gametest_run',
+  'gametest.run',
+  'Run GameTests in the singleplayer world (like /test run) and wait for them: pass/fail per test with the failure message and position. success = every required test passed. Run it in a flat test world; tests are built near the world spawn.',
+  gametestRun,
+  { timeout: (a) => (a.timeoutSeconds ?? 300) * 1000 + 15_000 },
+);
+
+tool(
+  'mc_connect',
+  'connect',
+  'Join a multiplayer server (like Multiplayer > Direct Connection) and wait until the player is in the world. Leaves any open world first. A dev server running MCTest accepts dev clients (offline mode) and ops them on join. Fails with the disconnect reason if the server refuses the client.',
+  {
+    address: z.string().optional().describe('host[:port] (default "localhost", port 25565)'),
+    timeoutMs: z.number().int().positive().optional().describe('Default 120000'),
+  },
+  { timeout: (a) => (a.timeoutMs ?? 120_000) + 15_000 },
+);
 
 tool('mc_world_delete', 'world.delete', 'Permanently delete a singleplayer world from the game\'s saves folder (not the one currently open).', {
   name: z.string().describe('levelId (folder) or exact display name'),
@@ -163,23 +311,37 @@ tool('mc_world_delete', 'world.delete', 'Permanently delete a singleplayer world
 server.registerTool(
   'mc_screenshot',
   {
-    description: 'Capture the game window. Returns the PNG image and the file path (saved under <gameDir>/mctest/screenshots/).',
-    inputSchema: { name: z.string().optional().describe('File name (letters, digits, . _ -); default is a timestamp') },
+    description:
+      'Capture the game window. Returns the image (scaled down to maxSize, as JPEG, so large windows arrive intact) and the path of the full-resolution PNG (saved under <gameDir>/mctest/screenshots/).',
+    inputSchema: {
+      name: z.string().optional().describe('File name (letters, digits, . _ -); default is a timestamp'),
+      maxSize: z.number().int().min(64).max(4096).optional().describe('Longest side of the returned image in pixels (default 1280; the PNG on disk is always full size)'),
+    },
     annotations: { readOnlyHint: true },
   },
-  async ({ name }) => {
+  async ({ name, maxSize }) => {
     try {
-      const r = await mc.call('screenshot', clean({ name }));
-      const data = (await readFile(r.path)).toString('base64');
-      return {
-        content: [
-          { type: 'image' as const, data, mimeType: 'image/png' },
-          { type: 'text' as const, text: JSON.stringify(r) },
-        ],
-      };
+      const r = await mc.call('screenshot', clean({ name, maxSize, inline: true }));
+      const { inline, ...info } = r;
+      // Older mods without inline support: fall back to the PNG file.
+      const image = inline
+        ? { type: 'image' as const, data: inline.data as string, mimeType: inline.mimeType as string }
+        : { type: 'image' as const, data: (await readFile(r.path)).toString('base64'), mimeType: 'image/png' };
+      if (inline) Object.assign(info, { sent: `${inline.width}x${inline.height} ${inline.mimeType}` });
+      return withErrors(mc, { content: [image, { type: 'text' as const, text: JSON.stringify(info) }] });
     } catch (e) {
       return errorResult(e);
     }
+  },
+);
+
+tool(
+  'mc_window_resize',
+  'window.resize',
+  'Resize the game window (leaves fullscreen), e.g. to test a GUI at different sizes and GUI scales. Returns the new size and GUI scale.',
+  {
+    width: z.number().int().min(320).describe('Window width in screen pixels'),
+    height: z.number().int().min(240).describe('Window height in screen pixels'),
   },
 );
 
@@ -257,7 +419,7 @@ tool('mc_keybinds', 'keybinds', 'All key mappings, including other mods\' (name 
 tool(
   'mc_wait_for',
   'waitFor',
-  'Wait until a condition holds, checked every client tick. Conditions: "screen:<Class>" (simple/full/superclass name, or "screen:none"), "slot:<menuIndex>=<item|empty>", "block:<x>,<y>,<z>=<blockId>", "ticks:<n>", "state:<loading|title|joining|in-world>", "log:<text>" (a new log line containing text), "entity:<type>[@radius]". Fails with the last observed value on timeout.',
+  'Wait until a condition holds, checked every client tick. Conditions: "screen:<Class>" (simple/full/superclass name, or "screen:none"), "slot:<menuIndex>=<item|empty>", "block:<x>,<y>,<z>=<blockId>", "ticks:<n>", "state:<loading|title|joining|in-world>", "log:<text>" (a new log line containing text), "chat:<text>" (a new chat/system message containing text), "entity:<type>[@radius]". Fails with the last observed value on timeout.',
   {
     condition: z.string(),
     timeoutTicks: z.number().int().positive().optional().describe('Default 100 (5 s)'),
@@ -511,6 +673,151 @@ tool(
   { timeout: () => 180_000 },
 );
 
+// ---------------------------------------------------------------- dedicated server
+
+const serverOpts = { client: srv };
+
+server.registerTool(
+  'mc_server_wait_ready',
+  {
+    description:
+      'Wait until the dedicated server (running MCTest) has finished starting and is accepting players (polls its status; tolerates the server not having started yet). Call this after launching ./gradlew :<loader>:runServer.',
+    inputSchema: { timeoutSeconds: z.number().positive().optional().describe('Give up after this long (default 300)') },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ timeoutSeconds }) => {
+    const deadline = Date.now() + (timeoutSeconds ?? 300) * 1000;
+    let last = 'not connected';
+    while (Date.now() < deadline) {
+      try {
+        const s = await srv.call('status', {}, 10_000, 1_000);
+        remember(srv, s);
+        last = `state=${s.state}`;
+        if (s.ready) {
+          return text({ ready: true, port: s.port, onlineMode: s.onlineMode, minecraft: s.minecraftVersion, loader: `${s.loader} ${s.loaderVersion}`, players: s.players });
+        }
+      } catch (e) {
+        last = (e as Error).message;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return errorResult(new Error(`Server not ready after ${timeoutSeconds ?? 300}s (last: ${last})`));
+  },
+);
+
+tool('mc_server_status', 'status', 'Dedicated server state (starting | running | stopping), game port, online mode, players online, tick count, ms per tick, frozen, dimensions, versions and mod list.', {}, {
+  ...serverOpts,
+  readOnly: true,
+});
+
+tool(
+  'mc_server_command',
+  'command',
+  'Run a command on the dedicated server as the console (full permissions, no player needed) and return its output, success flag and result value. Use it to set up tests (op, gamerule, setblock, give <player>, summon, execute as <player> run ...).',
+  {
+    command: z.string().describe('Command, with or without the leading slash'),
+    ticks: z.number().int().min(0).optional().describe('Also collect output sent over this many following ticks (default 0)'),
+  },
+  { ...serverOpts, timeout: (a) => ticksTimeout(a.ticks, 0) },
+);
+
+tool('mc_server_players', 'players', 'Players on the dedicated server as the server sees them: name, uuid, op, ping, position, dimension, gamemode, health, food, xp, inventory, open menu class, effects.', {}, {
+  ...serverOpts,
+  readOnly: true,
+});
+
+tool(
+  'mc_server_block',
+  'block',
+  'Read a block on the dedicated server (authoritative): id, state properties and full block-entity NBT. Compare with mc_block {source:"client"} to check client sync.',
+  { ...intXyz, dimension: z.string().optional().describe('e.g. "the_nether" (default overworld)') },
+  { ...serverOpts, readOnly: true },
+);
+
+tool(
+  'mc_server_entities',
+  'entities',
+  'Entities on the dedicated server: around a player (by name), around a point (x,y,z), or every loaded entity in a dimension. Sorted by distance when there is a centre.',
+  {
+    player: z.string().optional().describe('Centre on this player (uses their dimension)'),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    z: z.number().optional(),
+    dimension: z.string().optional().describe('Default overworld'),
+    radius: z.number().positive().optional().describe('Default 16 (ignored without a centre)'),
+    type: z.string().optional().describe('Entity type id, e.g. "zombie"'),
+    limit: z.number().int().positive().optional().describe('Default 50'),
+  },
+  { ...serverOpts, readOnly: true },
+);
+
+tool(
+  'mc_server_wait_for',
+  'waitFor',
+  'Wait on the dedicated server until a condition holds (checked every server tick). Conditions: "ticks:<n>", "log:<text>", "player:<name>" (online), "noplayer:<name>" (gone), "players:<n>" (at least n online), "block:<x>,<y>,<z>=<id>[@dimension]", "entity:<type>[@dimension]" (loaded anywhere).',
+  {
+    condition: z.string(),
+    timeoutTicks: z.number().int().positive().optional().describe('Default 100 (5 s)'),
+  },
+  { ...serverOpts, timeout: (a) => ticksTimeout(a.timeoutTicks, 100), readOnly: true },
+);
+
+tool(
+  'mc_server_logs',
+  'logs',
+  'Captured dedicated-server log lines (with exception stacks), newest last. Pass the returned "next" as since to get only newer lines.',
+  {
+    since: z.number().int().optional(),
+    level: z.enum(['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL']).optional().describe('Minimum level'),
+    contains: z.string().optional(),
+    limit: z.number().int().positive().optional().describe('Default 200'),
+  },
+  { ...serverOpts, readOnly: true },
+);
+
+tool('mc_server_time_status', 'time.status', 'Whether the dedicated server is frozen or stepping, its tick rate and game time.', {}, { ...serverOpts, readOnly: true });
+tool('mc_server_time_freeze', 'time.freeze', "Freeze the dedicated server's worlds (like /tick freeze): mobs, blocks, crops, fluids stop; players can still move.", {}, serverOpts);
+tool('mc_server_time_unfreeze', 'time.unfreeze', "Unfreeze the dedicated server's worlds.", {}, serverOpts);
+tool(
+  'mc_server_time_step',
+  'time.step',
+  'Advance a frozen dedicated server by exactly N ticks and wait until done.',
+  { ticks: z.number().int().positive().describe('Ticks to advance') },
+  { ...serverOpts, timeout: (a) => ticksTimeout(a.ticks, 1) },
+);
+
+tool(
+  'mc_server_gametest_list',
+  'gametest.list',
+  'List the GameTests registered on the dedicated server.',
+  { filter: z.string().optional() },
+  { ...serverOpts, readOnly: true },
+);
+tool(
+  'mc_server_gametest_run',
+  'gametest.run',
+  'Run GameTests on the dedicated server (like /test run) and wait for them: pass/fail per test with the failure message and position.',
+  gametestRun,
+  { ...serverOpts, timeout: (a) => (a.timeoutSeconds ?? 300) * 1000 + 15_000 },
+);
+
+tool('mc_server_stop', 'stop', 'Save and stop the dedicated server (like /stop). Connected clients are disconnected.', {}, serverOpts);
+
+server.registerTool(
+  'mc_server_call',
+  {
+    description: "Call any method of the dedicated server's MCTest API directly with raw params.",
+    inputSchema: { method: z.string(), params: z.record(z.string(), z.unknown()).optional(), timeoutMs: z.number().int().positive().optional() },
+  },
+  async ({ method, params, timeoutMs }) => {
+    try {
+      return withErrors(srv, text(await srv.call(method, params ?? {}, timeoutMs ?? 60_000)));
+    } catch (e) {
+      return errorResult(e);
+    }
+  },
+);
+
 // ---------------------------------------------------------------- escape hatch
 
 server.registerTool(
@@ -521,7 +828,7 @@ server.registerTool(
   },
   async ({ method, params, timeoutMs }) => {
     try {
-      return text(await mc.call(method, params ?? {}, timeoutMs ?? 60_000));
+      return withErrors(mc, text(await mc.call(method, params ?? {}, timeoutMs ?? 60_000)));
     } catch (e) {
       return errorResult(e);
     }

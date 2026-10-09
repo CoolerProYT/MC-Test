@@ -1,6 +1,8 @@
 package com.coolerpromc.mctest.methods;
 
 import com.coolerpromc.mctest.Constants;
+import com.coolerpromc.mctest.mixin.BackupConfirmScreenAccessor;
+import com.coolerpromc.mctest.mixin.DisconnectedScreenAccessor;
 import com.coolerpromc.mctest.rpc.ClientThread;
 import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
@@ -10,7 +12,13 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
@@ -28,6 +36,7 @@ import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.LevelSummary;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -36,7 +45,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 /**
- * Singleplayer world lifecycle. Vanilla's world load spins its own loop on the render thread (as when you press
+ * World lifecycle: singleplayer worlds, and joining a multiplayer server. Vanilla's world load spins its own loop on the render thread (as when you press
  * "Create New World"); other requests keep being served during it, but client ticks pause, so completion is detected
  * with a wall-clock deadline rather than a tick count.
  */
@@ -51,15 +60,19 @@ public final class WorldLifecycleMethods {
         RpcRegistry.register("world.list", params -> listWorlds());
         RpcRegistry.register("world.create", params -> {
             CreateSpec spec = CreateSpec.parse(params);
-            boolean wait = Params.bool(params, "wait", true);
-            long timeout = (long) Params.number(params, "timeoutMs", DEFAULT_TIMEOUT_MS);
-            return ClientThread.callAsync(() -> create(spec, wait, timeout));
+            WaitSpec wait = WaitSpec.parse(params);
+            return ClientThread.callAsync(() -> create(spec, wait));
         });
         RpcRegistry.register("world.join", params -> {
             String name = Params.string(params, "name");
-            boolean wait = Params.bool(params, "wait", true);
-            long timeout = (long) Params.number(params, "timeoutMs", DEFAULT_TIMEOUT_MS);
-            return resolveLevelId(name).thenCompose(id -> ClientThread.callAsync(() -> join(id, wait, timeout)));
+            WaitSpec wait = WaitSpec.parse(params);
+            return resolveLevelId(name).thenCompose(id -> ClientThread.callAsync(() -> join(id, wait)));
+        });
+        RpcRegistry.register("connect", params -> {
+            String address = Params.string(params, "address", "localhost");
+            if (!ServerAddress.isValidAddress(address)) throw new RpcException("Not a valid server address: " + address);
+            WaitSpec wait = WaitSpec.parse(params);
+            return ClientThread.callAsync(() -> connect(address, wait));
         });
         RpcRegistry.register("world.leave", params -> {
             long timeout = (long) Params.number(params, "timeoutMs", DEFAULT_TIMEOUT_MS);
@@ -106,7 +119,7 @@ public final class WorldLifecycleMethods {
         }
     }
 
-    private static CompletableFuture<JsonElement> create(CreateSpec spec, boolean wait, long timeoutMs) {
+    private static CompletableFuture<JsonElement> create(CreateSpec spec, WaitSpec wait) {
         Minecraft mc = ClientThread.mc();
         String folder;
         try {
@@ -132,12 +145,12 @@ public final class WorldLifecycleMethods {
         out.addProperty("name", spec.name());
         // As a string: 64-bit seeds lose precision as JSON numbers in JavaScript clients.
         out.addProperty("seed", Long.toString(options.seed()));
-        return wait ? waitForWorld(out, timeoutMs) : CompletableFuture.completedFuture(out);
+        return wait.block() ? waitForWorld(out, wait) : CompletableFuture.completedFuture(out);
     }
 
     // ---- join ----
 
-    private static CompletableFuture<JsonElement> join(String levelId, boolean wait, long timeoutMs) {
+    private static CompletableFuture<JsonElement> join(String levelId, WaitSpec wait) {
         Minecraft mc = ClientThread.mc();
         mc.execute(() -> {
             leaveIfInWorld(mc);
@@ -145,44 +158,114 @@ public final class WorldLifecycleMethods {
         });
         JsonObject out = new JsonObject();
         out.addProperty("levelId", levelId);
-        return wait ? waitForWorld(out, timeoutMs) : CompletableFuture.completedFuture(out);
+        return wait.block() ? waitForWorld(out, wait) : CompletableFuture.completedFuture(out);
+    }
+
+    // ---- connect ----
+
+    /** Same as Multiplayer > Direct Connection. Leaves any open world first. */
+    private static CompletableFuture<JsonElement> connect(String address, WaitSpec wait) {
+        Minecraft mc = ClientThread.mc();
+        ServerAddress parsed = ServerAddress.parseString(address);
+        mc.execute(() -> {
+            leaveIfInWorld(mc);
+            ConnectScreen.startConnecting(new JoinMultiplayerScreen(new TitleScreen()), mc, parsed,
+                    new ServerData("MCTest", address, ServerData.Type.OTHER), false, null);
+        });
+        JsonObject out = new JsonObject();
+        out.addProperty("address", parsed.getHost() + ":" + parsed.getPort());
+        return wait.block() ? waitForWorld(out, wait) : CompletableFuture.completedFuture(out);
     }
 
     /**
-     * Completes once the player is in the world and the loading screen has gone, or fails if the client ends up back
-     * on a menu (e.g. a load error or a "this world uses experimental settings" prompt it cannot click through).
+     * @param block          wait until in the world (else return as soon as loading starts)
+     * @param timeoutMs      give up after this long
+     * @param confirmPrompts answer "experimental settings" / "make a backup?" prompts with "I know what I'm doing"
+     *                       (a test world rarely needs a backup); otherwise fail on them
      */
-    private static CompletableFuture<JsonElement> waitForWorld(JsonObject out, long timeoutMs) {
+    private record WaitSpec(boolean block, long timeoutMs, boolean confirmPrompts) {
+        static WaitSpec parse(JsonObject params) {
+            return new WaitSpec(Params.bool(params, "wait", true), (long) Params.number(params, "timeoutMs", DEFAULT_TIMEOUT_MS),
+                    Params.bool(params, "confirmPrompts", true));
+        }
+    }
+
+    /** A menu that is not part of loading: if the client sits on one this long without loading, it is stuck. */
+    private static final long STUCK_MS = 10_000;
+
+    /**
+     * Completes once the player is in the world and the loading screen has gone. Fails with the screen's title and
+     * buttons if the client ends up on (or stays on) a menu instead, e.g. a load error or a prompt.
+     */
+    private static CompletableFuture<JsonElement> waitForWorld(JsonObject out, WaitSpec spec) {
         CompletableFuture<JsonElement> future = new CompletableFuture<>();
         long start = System.currentTimeMillis();
-        long deadline = start + timeoutMs;
+        long deadline = start + spec.timeoutMs();
         boolean[] sawLoading = {false};
+        long[] menuSince = {-1};
+        JsonArray confirmed = new JsonArray();
         TickScheduler.add(() -> {
             Minecraft mc = ClientThread.mc();
             String state = StatusMethods.state(mc);
-            if (state.equals("in-world") && mc.gui.screen() == null) {
+            Screen screen = mc.gui.screen();
+            if (state.equals("in-world") && screen == null) {
                 out.addProperty("state", state);
                 out.addProperty("loadMs", System.currentTimeMillis() - start);
+                if (!confirmed.isEmpty()) out.add("confirmedPrompts", confirmed);
                 future.complete(out);
                 return true;
             }
+            if (screen instanceof BackupConfirmScreenAccessor prompt) {
+                if (!spec.confirmPrompts()) {
+                    future.completeExceptionally(new RpcException("World load needs confirmation: " + describe(screen)
+                            + ". Pass confirmPrompts:true (the default) to proceed without a backup"));
+                    return true;
+                }
+                confirmed.add(screen.getTitle().getString());
+                Constants.LOG.info("MCTest: answered '{}' with \"I know what I'm doing\"", screen.getTitle().getString());
+                prompt.mctest$getOnProceed().proceed(false, false);
+                return false;
+            }
             if (!state.equals("title")) {
                 sawLoading[0] = true;
+                menuSince[0] = -1;
             } else if (sawLoading[0]) {
                 // Went loading -> back to a menu without entering the world.
-                future.completeExceptionally(new RpcException("World did not load; client is on "
-                        + (mc.gui.screen() == null ? "no screen" : mc.gui.screen().getClass().getSimpleName())
-                        + ". Check logs or snapshot for details."));
+                if (screen instanceof DisconnectedScreenAccessor disconnected) {
+                    future.completeExceptionally(new RpcException("Disconnected: " + screen.getTitle().getString()
+                            + ": " + disconnected.mctest$getDetails().reason().getString()));
+                    return true;
+                }
+                future.completeExceptionally(new RpcException("World did not load; client is on " + describe(screen)
+                        + ". Check mc_logs for the cause"));
                 return true;
+            } else {
+                long now = System.currentTimeMillis();
+                if (menuSince[0] < 0) menuSince[0] = now;
+                if (now - menuSince[0] > STUCK_MS) {
+                    future.completeExceptionally(new RpcException("World never started loading; client is stuck on " + describe(screen)
+                            + ". Answer it with mc_click_widget, or check mc_logs"));
+                    return true;
+                }
             }
             if (System.currentTimeMillis() > deadline) {
-                future.completeExceptionally(new RpcException("Timed out after " + timeoutMs + "ms waiting for the world (state: " + state
-                        + ", screen: " + (mc.gui.screen() == null ? "none" : mc.gui.screen().getClass().getSimpleName()) + ")"));
+                future.completeExceptionally(new RpcException("Timed out after " + spec.timeoutMs() + "ms waiting for the world (state: "
+                        + state + ", screen: " + describe(screen) + ")"));
                 return true;
             }
             return false;
         });
         return future;
+    }
+
+    /** {@code Class "title" [button, button]}, for error messages. */
+    private static String describe(Screen screen) {
+        if (screen == null) return "no screen";
+        List<String> buttons = new ArrayList<>();
+        for (var child : screen.children()) {
+            if (child instanceof AbstractWidget w && !w.getMessage().getString().isBlank()) buttons.add(w.getMessage().getString());
+        }
+        return screen.getClass().getSimpleName() + " \"" + screen.getTitle().getString() + "\"" + (buttons.isEmpty() ? "" : " " + buttons);
     }
 
     // ---- leave ----
@@ -215,7 +298,7 @@ public final class WorldLifecycleMethods {
         return future;
     }
 
-    /** Same as the pause menu's "Save and Quit to Title" (saves and stops the integrated server). */
+    /** Same as the pause menu's "Save and Quit to Title" (saves and stops the integrated server) or "Disconnect". */
     private static void leaveIfInWorld(Minecraft mc) {
         if (mc.level != null) {
             mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);

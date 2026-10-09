@@ -1,5 +1,6 @@
 package com.coolerpromc.mctest.methods;
 
+import com.coolerpromc.mctest.capture.ChatCapture;
 import com.coolerpromc.mctest.capture.LogCapture;
 import com.coolerpromc.mctest.rpc.ClientThread;
 import com.coolerpromc.mctest.rpc.Params;
@@ -14,7 +15,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
-import org.apache.logging.log4j.Level;
 
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
@@ -22,7 +22,6 @@ import java.util.function.Supplier;
 
 /**
  * {@code waitFor}: a condition checked at the end of every client tick until it holds or the timeout expires.
- * Also hosts {@code logs}.
  */
 public final class WaitMethods {
 
@@ -44,21 +43,14 @@ public final class WaitMethods {
             int finalTimeout = timeout;
             return ClientThread.callAsync(() -> waitFor(condition, check, finalTimeout));
         });
-        RpcRegistry.register("logs", params -> {
-            long since = (long) Params.number(params, "since", 0);
-            String level = Params.string(params, "level", null);
-            Level minLevel = level == null ? null : Level.toLevel(level.toUpperCase(Locale.ROOT), null);
-            if (level != null && minLevel == null) {
-                throw new RpcException("Unknown level '" + level + "'. Use TRACE, DEBUG, INFO, WARN, ERROR or FATAL");
-            }
-            String contains = Params.string(params, "contains", null);
-            int limit = Math.max(1, Params.integer(params, "limit", 200));
-            return CompletableFuture.completedFuture(LogCapture.query(since, minLevel, contains, limit));
-        });
     }
 
     private static CompletableFuture<JsonElement> waitFor(String condition, Supplier<Check> check, int timeoutTicks) {
         CompletableFuture<JsonElement> future = new CompletableFuture<>();
+        if (check instanceof ChatCheck chat) {
+            // Now, on the render thread: a reply can arrive before the first tick check.
+            chat.start();
+        }
         int[] elapsed = {0};
         TickScheduler.add(() -> {
             elapsed[0]++;
@@ -69,6 +61,7 @@ public final class WaitMethods {
                 result = new Check(false, e.getMessage());
             }
             if (result.passed()) {
+                close(check);
                 JsonObject out = new JsonObject();
                 out.addProperty("condition", condition);
                 out.addProperty("passed", true);
@@ -78,6 +71,7 @@ public final class WaitMethods {
                 return true;
             }
             if (elapsed[0] >= timeoutTicks) {
+                close(check);
                 future.completeExceptionally(new RpcException("waitFor timed out after " + timeoutTicks + " ticks: "
                         + condition + " (last observed: " + result.observed() + ")"));
                 return true;
@@ -87,12 +81,22 @@ public final class WaitMethods {
         return future;
     }
 
+    private static void close(Supplier<Check> check) {
+        if (check instanceof AutoCloseable c) {
+            try {
+                c.close();
+            } catch (Exception ignored) {
+                // Nothing to release that matters.
+            }
+        }
+    }
+
     // ---- conditions ----
 
     private static Supplier<Check> parse(String condition) {
         int colon = condition.indexOf(':');
         if (colon < 0) {
-            throw new RpcException("Condition must look like kind:value. Kinds: screen, slot, block, ticks, state, log, entity");
+            throw new RpcException("Condition must look like kind:value. Kinds: screen, slot, block, ticks, state, log, chat, entity");
         }
         String kind = condition.substring(0, colon).trim().toLowerCase(Locale.ROOT);
         String arg = condition.substring(colon + 1).trim();
@@ -102,12 +106,13 @@ public final class WaitMethods {
             case "block" -> block(arg);
             case "ticks" -> ticks(arg);
             case "log" -> log(arg);
+            case "chat" -> new ChatCheck(arg);
             case "entity" -> entity(arg);
             case "state" -> () -> {
                 String state = StatusMethods.state(ClientThread.mc());
                 return new Check(state.equalsIgnoreCase(arg), state);
             };
-            default -> throw new RpcException("Unknown condition kind '" + kind + "'. Kinds: screen, slot, block, ticks, state, log, entity");
+            default -> throw new RpcException("Unknown condition kind '" + kind + "'. Kinds: screen, slot, block, ticks, state, log, chat, entity");
         };
     }
 
@@ -205,6 +210,40 @@ public final class WaitMethods {
             return line == null ? new Check(false, "no matching line yet")
                     : new Check(true, "[" + line.get("level").getAsString() + "] " + line.get("message").getAsString());
         };
+    }
+
+    /**
+     * {@code chat:some text}: a chat or system message containing the text (case-insensitive) arrives after the wait
+     * starts.
+     */
+    private static final class ChatCheck implements Supplier<Check>, AutoCloseable {
+        private final String needle;
+        private ChatCapture.Session session;
+
+        ChatCheck(String needle) {
+            if (needle.isEmpty()) throw new RpcException("Use chat:<text>");
+            this.needle = needle.toLowerCase(Locale.ROOT);
+        }
+
+        /** Render thread only. */
+        void start() {
+            if (session == null) session = ChatCapture.open();
+        }
+
+        @Override
+        public Check get() {
+            start();
+            for (var line : session.lines()) {
+                String text = line.getAsJsonObject().get("text").getAsString();
+                if (text.toLowerCase(Locale.ROOT).contains(needle)) return new Check(true, text);
+            }
+            return new Check(false, session.lines().size() + " message(s), none matching");
+        }
+
+        @Override
+        public void close() {
+            if (session != null) session.close();
+        }
     }
 
     /** {@code entity:minecraft:zombie} or {@code entity:zombie@8}: such an entity within the radius (default 32). */

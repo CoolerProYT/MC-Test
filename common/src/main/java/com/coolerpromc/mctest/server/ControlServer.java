@@ -25,6 +25,8 @@ public final class ControlServer {
 
     public static final String HOST = "127.0.0.1";
     public static final int DEFAULT_PORT = 25599;
+    /** Default for the dedicated server's control API, so a client and a server can run side by side. */
+    public static final int DEFAULT_SERVER_PORT = 25598;
 
     private static EventLoopGroup group;
     private static Channel channel;
@@ -36,11 +38,14 @@ public final class ControlServer {
         return Integer.getInteger("mctest.port", DEFAULT_PORT);
     }
 
-    public static synchronized void start() {
+    public static int configuredServerPort() {
+        return Integer.getInteger("mctest.serverPort", DEFAULT_SERVER_PORT);
+    }
+
+    public static synchronized void start(int port) {
         if (channel != null) {
             return;
         }
-        int port = configuredPort();
         group = new MultiThreadIoEventLoopGroup(1, new DefaultThreadFactory("mctest-ws", true), NioIoHandler.newFactory());
         WebSocketServerProtocolConfig wsConfig = WebSocketServerProtocolConfig.newBuilder()
                 .websocketPath("/")

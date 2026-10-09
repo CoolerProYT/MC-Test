@@ -6,6 +6,7 @@ import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
 import com.coolerpromc.mctest.rpc.RpcRegistry;
 import com.coolerpromc.mctest.tick.TickScheduler;
+import com.coolerpromc.mctest.util.Describe;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -20,14 +21,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -241,7 +238,7 @@ public final class WorldMethods {
         boolean useServer = switch (source) {
             case "auto" -> server != null;
             case "server" -> {
-                if (server == null) throw new RpcException("source=server needs a singleplayer world");
+                if (server == null) throw new RpcException("source=server needs a singleplayer world; on a dedicated server use the server control API (mc_server_block)");
                 yield true;
             }
             case "client" -> false;
@@ -252,32 +249,10 @@ public final class WorldMethods {
             return server.submit(() -> {
                 ServerLevel level = server.getLevel(dimension);
                 if (level == null) throw new RpcException("Server has no level " + dimension.identifier());
-                return describeBlock(level, pos, "server");
+                return Describe.block(level, pos, "server");
             });
         }
-        return CompletableFuture.completedFuture(describeBlock(mc.level, pos, "client"));
-    }
-
-    private static JsonElement describeBlock(Level level, BlockPos pos, String source) {
-        JsonObject out = new JsonObject();
-        out.add("pos", pos(pos));
-        out.addProperty("source", source);
-        out.addProperty("loaded", level.isLoaded(pos));
-        BlockState state = level.getBlockState(pos);
-        out.addProperty("id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
-        JsonObject properties = new JsonObject();
-        state.getValues().forEach(v -> properties.addProperty(v.property().getName(), v.valueName()));
-        out.add("properties", properties);
-        BlockEntity be = level.getBlockEntity(pos);
-        if (be != null) {
-            JsonObject b = new JsonObject();
-            b.addProperty("type", String.valueOf(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType())));
-            b.addProperty("nbt", be.saveWithFullMetadata(level.registryAccess()).toString());
-            out.add("blockEntity", b);
-        } else {
-            out.add("blockEntity", null);
-        }
-        return out;
+        return CompletableFuture.completedFuture(Describe.block(mc.level, pos, "client"));
     }
 
     // ---- entities ----
@@ -293,23 +268,7 @@ public final class WorldMethods {
 
         JsonArray list = new JsonArray();
         for (Entity e : found.subList(0, Math.min(limit, found.size()))) {
-            JsonObject o = new JsonObject();
-            o.addProperty("id", e.getId());
-            o.addProperty("uuid", e.getUUID().toString());
-            o.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString());
-            o.addProperty("name", e.getName().getString());
-            o.addProperty("customName", e.getCustomName() == null ? null : e.getCustomName().getString());
-            o.add("pos", vec(e.position()));
-            o.addProperty("distance", e.position().distanceTo(origin));
-            o.addProperty("yaw", e.getYRot());
-            o.addProperty("pitch", e.getXRot());
-            if (e instanceof LivingEntity living) {
-                o.addProperty("health", living.getHealth());
-                o.addProperty("maxHealth", living.getMaxHealth());
-            }
-            if (e instanceof ItemEntity item) {
-                o.add("item", ScreenInspector.stack(item.getItem()));
-            }
+            JsonObject o = Describe.entity(e, origin);
             list.add(o);
         }
         JsonObject out = new JsonObject();
@@ -338,18 +297,10 @@ public final class WorldMethods {
     }
 
     static JsonObject vec(Vec3 v) {
-        JsonObject o = new JsonObject();
-        o.addProperty("x", v.x);
-        o.addProperty("y", v.y);
-        o.addProperty("z", v.z);
-        return o;
+        return Describe.vec(v);
     }
 
     static JsonObject pos(BlockPos p) {
-        JsonObject o = new JsonObject();
-        o.addProperty("x", p.getX());
-        o.addProperty("y", p.getY());
-        o.addProperty("z", p.getZ());
-        return o;
+        return Describe.pos(p);
     }
 }

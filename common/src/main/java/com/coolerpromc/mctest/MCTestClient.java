@@ -2,7 +2,9 @@ package com.coolerpromc.mctest;
 
 import com.coolerpromc.mctest.capture.LogCapture;
 import com.coolerpromc.mctest.methods.ActionMethods;
+import com.coolerpromc.mctest.methods.GameTestMethods;
 import com.coolerpromc.mctest.methods.InputMethods;
+import com.coolerpromc.mctest.methods.LogMethods;
 import com.coolerpromc.mctest.methods.ScreenshotMethods;
 import com.coolerpromc.mctest.methods.SkillMethods;
 import com.coolerpromc.mctest.methods.StatusMethods;
@@ -10,6 +12,8 @@ import com.coolerpromc.mctest.methods.WaitMethods;
 import com.coolerpromc.mctest.methods.WorldLifecycleMethods;
 import com.coolerpromc.mctest.methods.WorldMethods;
 import com.coolerpromc.mctest.platform.Services;
+import com.coolerpromc.mctest.rpc.ClientThread;
+import com.coolerpromc.mctest.rpc.RpcException;
 import com.coolerpromc.mctest.server.ControlServer;
 import com.coolerpromc.mctest.tick.TickScheduler;
 import net.minecraft.client.Minecraft;
@@ -36,11 +40,17 @@ public final class MCTestClient {
         InputMethods.register();
         WorldMethods.register();
         WaitMethods.register();
+        LogMethods.register();
+        GameTestMethods.register(() -> {
+            var server = ClientThread.mc().getSingleplayerServer();
+            if (server == null) throw new RpcException("GameTests run in a singleplayer world here; on a dedicated server use mc_server_gametest_run");
+            return server;
+        });
         WorldLifecycleMethods.register();
         ActionMethods.register();
         SkillMethods.register();
 
-        ControlServer.start();
+        ControlServer.start(ControlServer.configuredPort());
     }
 
     /** Called by the loader at the end of every client tick, on the render thread. */

@@ -8,13 +8,16 @@
         "${mod_author}"
     ],
     "license": "${license}",
-    "environment": "client",
+    "environment": "*",
     "entrypoints": {
         "preLaunch": [
             "com.coolerpromc.mctest.MCTestFabricPreLaunch"
         ],
         "client": [
             "com.coolerpromc.mctest.MCTestFabric"
+        ],
+        "server": [
+            "com.coolerpromc.mctest.MCTestFabricServer"
         ]
     },
     "mixins": [

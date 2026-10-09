@@ -1,6 +1,7 @@
 package com.coolerpromc.mctest.methods;
 
 import com.coolerpromc.mctest.mixin.AbstractContainerScreenAccessor;
+import com.coolerpromc.mctest.util.Describe;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.gui.components.AbstractSelectionList;
@@ -16,8 +17,6 @@ import net.minecraft.client.gui.layouts.LayoutElement;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.core.component.DataComponentPatch;
-import net.minecraft.core.component.TypedDataComponent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
@@ -33,7 +32,6 @@ import java.util.List;
 public final class ScreenInspector {
 
     private static final int ID_TEXT_LIMIT = 40;
-    private static final int COMPONENT_VALUE_LIMIT = 200;
 
     private ScreenInspector() {
     }
@@ -205,35 +203,6 @@ public final class ScreenInspector {
 
     /** Item id, count, display name, damage and the components that differ from the item's defaults. */
     public static @Nullable JsonObject stack(ItemStack item) {
-        if (item.isEmpty()) {
-            return null;
-        }
-        JsonObject o = new JsonObject();
-        o.addProperty("item", BuiltInRegistries.ITEM.getKey(item.getItem()).toString());
-        o.addProperty("count", item.getCount());
-        o.addProperty("name", item.getHoverName().getString());
-        if (item.isDamageableItem()) {
-            o.addProperty("damage", item.getDamageValue());
-            o.addProperty("maxDamage", item.getMaxDamage());
-        }
-        DataComponentPatch patch = item.getComponentsPatch();
-        if (!patch.isEmpty()) {
-            DataComponentPatch.SplitResult split = patch.split();
-            JsonObject components = new JsonObject();
-            for (TypedDataComponent<?> c : split.added()) {
-                String value = String.valueOf(c.value());
-                if (value.length() > COMPONENT_VALUE_LIMIT) {
-                    value = value.substring(0, COMPONENT_VALUE_LIMIT) + "...";
-                }
-                components.addProperty(String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(c.type())), value);
-            }
-            o.add("components", components);
-            if (!split.removed().isEmpty()) {
-                JsonArray removed = new JsonArray();
-                split.removed().forEach(t -> removed.add(String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(t))));
-                o.add("removedComponents", removed);
-            }
-        }
-        return o;
+        return Describe.stack(item);
     }
 }

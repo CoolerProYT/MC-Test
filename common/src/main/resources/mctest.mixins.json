@@ -9,9 +9,14 @@
     "ChatComponentMixin",
     "MinecraftMixin",
     "KeyboardHandlerMixin",
-    "MouseHandlerMixin"
+    "MouseHandlerMixin",
+    "DisconnectedScreenAccessor",
+    "BackupConfirmScreenAccessor"
   ],
-  "server": [],
+  "server": [
+    "DedicatedServerMixin",
+    "MinecraftServerMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

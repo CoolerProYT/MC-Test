@@ -9,8 +9,8 @@ read logs and take screenshots. The main use is testing your own mods.
 Claude Code ──stdio/MCP──▶ mcp/ (Node) ──WebSocket JSON-RPC──▶ MCTest mod in your dev client (127.0.0.1:25599)
 ```
 
-- **Client only, loopback only.** The control server binds to `127.0.0.1`. The mod is `environment: client` on Fabric
-  and `dist = CLIENT` on NeoForge, so it does nothing on a dedicated server.
+- **Loopback only.** The control servers bind to `127.0.0.1`. On the client, MCTest drives the game; on a dedicated
+  server (optional, see [Testing on a dedicated server](#testing-on-a-dedicated-server)) it exposes the server side.
 - **Never ship it.** Add it to your mod as a dev-runtime dependency (see below). It is not bundled into your jar or
   published POM.
 - Everything runs through vanilla code paths: input goes through Minecraft's own mouse/keyboard handlers and key
@@ -110,6 +110,39 @@ Start your client with `./gradlew :fabric:runClient` (or `:neoforge:runClient`);
 To run the server from this checkout instead (when changing it): `cd mcp && npm install`, then register
 `node <path-to-checkout>/mcp/dist/index.js`. Publish a new version with `npm version patch && npm publish` from `mcp/`.
 
+### Testing on a dedicated server
+
+Multiplayer bugs (missing packets, client/server desync, code that only works in singleplayer because both sides share
+a JVM) only show up against a real dedicated server. MCTest runs on the server too: the same `localRuntime` dependency
+puts it on `runServer`, where it opens a second control API on `ws://127.0.0.1:25598/` (`-Dmctest.serverPort=...`)
+that the `mc_server_*` tools talk to.
+
+```bash
+./gradlew :fabric:runServer     # or :neoforge:runServer (first run: accept the EULA in runs/server/eula.txt)
+./gradlew :fabric:runClient     # in a second terminal
+```
+
+Then the agent calls `mc_server_wait_ready`, `mc_wait_ready` and `mc_connect` (default `localhost`). From there client
+tools drive the player as usual, and the server tools show and change the authoritative side:
+
+```
+mc_server_command "setblock 10 64 10 mymod:grinder" → mc_connect → mc_use_on (open it) → mc_click_slot …
+→ mc_server_block {x:10,y:64,z:10}  (server NBT)  vs  mc_block {…, source:"client"}  (what the client was sent)
+→ mc_server_wait_for "log:Grinder finished" → mc_server_logs {level:"WARN"}
+```
+
+In a development environment MCTest makes a dev server usable by dev clients:
+
+- **Offline mode.** Dev clients have no Mojang session, so the server skips authentication and does not require signed
+  chat, whatever `server.properties` says. Opt out with `-Dmctest.onlineMode=true`.
+- **No whitelist.** New 26.x servers whitelist by default; MCTest turns it off at startup (as `/whitelist off` would).
+  `/whitelist on` still works afterwards. Keep it with `-Dmctest.whitelist=true`.
+- **Auto-op.** Players are opped when they join, so `mc_command` works from the client. A test that deops a player is
+  respected until they rejoin. Turn off with `-Dmctest.autoOp=false` (for permission tests).
+
+The server API has no singleplayer equivalent and is not started in the integrated server: in singleplayer the client
+API already reads the integrated server directly (`mc_block`, `mc_time_*`).
+
 ### A typical agent session
 
 > Start the NeoForge client in the background, wait until it's ready, create a flat creative test world, give me a
@@ -136,7 +169,8 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 |---|---|---|
 | `mc_status` | `status` | State (`starting`/`loading`/`title`/`joining`/`in-world`), `ready`, screen, MC + loader versions, mod list |
 | `mc_wait_ready` | (polls `status`) | Wait until the client is up and accepting input; tolerates the game not running yet |
-| `mc_screenshot` | `screenshot {name?}` | Saves to `<gameDir>/mctest/screenshots/`, returns the PNG image and path |
+| `mc_screenshot` | `screenshot {name?,maxSize?}` | Saves a full-size PNG to `<gameDir>/mctest/screenshots/`; returns the path and the image scaled to fit `maxSize` (default 1280) as JPEG, so large windows arrive intact |
+| `mc_window_resize` | `window.resize {width,height}` | Resize the game window (leaves fullscreen); returns size and GUI scale |
 | `mc_snapshot` | `snapshot` | Screen class/title, widgets (`index:Class:text` id, type, text, x/y/w/h, active, focused, visible, values), container slots (menu index, item, count, components, x/y), carried stack |
 | `mc_click` | `click {x,y,button?,modifiers?}` | Click at GUI coordinates through the real mouse handler |
 | `mc_click_widget` | `clickWidget {id}` | Click a widget's centre. Old ids still work if `Class:text` is unique |
@@ -161,12 +195,17 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_attack_entity` | `attackEntity {id}` | Attack an entity |
 | `mc_interact_entity` | `interactEntity {id,hand?}` | Right-click an entity (trade, milk, ride, mod entities) |
 | `mc_tooltip` | `tooltip {slot,advanced?}` | Tooltip lines of an item (menu slot if a container is open, else inventory slot) |
-| `mc_wait_for` | `waitFor {condition,timeoutTicks?}` | `screen:<Class>`/`screen:none`, `slot:<i>=<item\|empty>`, `block:<x,y,z>=<id>`, `ticks:<n>`, `state:<state>`, `log:<text>`, `entity:<type>[@radius]` |
+| `mc_wait_for` | `waitFor {condition,timeoutTicks?}` | `screen:<Class>`/`screen:none`, `slot:<i>=<item\|empty>`, `block:<x,y,z>=<id>`, `ticks:<n>`, `state:<state>`, `log:<text>`, `chat:<text>`, `entity:<type>[@radius]` |
 | `mc_logs` | `logs {since?,level?,contains?,limit?}` | Captured log lines with exception stacks, paged by sequence number |
 | `mc_reload_resources` | `reloadResources` | Reload resource packs (F3+T) after editing assets |
 | `mc_world_create` | `world.create {name,seed?,flat?,gamemode?,difficulty?,cheats?,…}` | New world, waits until in-world (creative + cheats by default) |
-| `mc_world_join` | `world.join {name}` | Open an existing world by folder id or display name |
-| `mc_world_leave` | `world.leave` | Save and quit to title |
+| `mc_world_join` | `world.join {name,confirmPrompts?}` | Open an existing world by folder id or display name. Answers the "experimental settings / backup" prompt (any world with datapack registry content gets it) unless `confirmPrompts:false` |
+| `mc_world_leave` | `world.leave` | Save and quit to title, or disconnect from a server |
+| `mc_connect` | `connect {address?}` | Join a multiplayer server and wait until in-world; fails with the disconnect reason |
+| `mc_quit` | `quit` | Quit the game cleanly (saves first), e.g. to restart after rebuilding your mod |
+| `mc_crash_report` | (reads files) | Newest crash report or JVM `hs_err` log of the client or server, also after the game has died |
+| `mc_gametest_list` | `gametest.list {filter?}` | GameTests registered in the singleplayer world (vanilla, your mod's, datapack test instances) |
+| `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (`/test run <selector>`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
 | `mc_world_list` | `world.list` | Worlds in the saves folder |
 | `mc_world_delete` | `world.delete {name}` | Delete a world (not the open one) |
 | `mc_time_freeze` / `mc_time_unfreeze` | `time.freeze` / `time.unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act |
@@ -182,6 +221,23 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_select_item` | `selectItem {item}` | Hold an item (swaps it into the hotbar if needed) |
 | `mc_scan_blocks` | `scanBlocks {radius?, blocks?}` | Block types around you with counts and nearest positions (ids or `#tags`) |
 | `mc_call` | any | Escape hatch: call a method by name with raw params |
+
+Dedicated-server tools (the server's own API, port 25598):
+
+| Tool | Method | What it does |
+|---|---|---|
+| `mc_server_wait_ready` | (polls `status`) | Wait until the server has started; tolerates it not running yet |
+| `mc_server_status` | `status` | State (`starting`/`running`/`stopping`), game port, online mode, players, ms/tick, frozen, dimensions, mods |
+| `mc_server_command` | `command {command,ticks?}` | Run a command as the console (full permissions); returns output, success, result |
+| `mc_server_players` | `players` | Players as the server sees them: op, ping, position, dimension, gamemode, health, inventory, open menu, effects |
+| `mc_server_block` | `block {x,y,z,dimension?}` | Authoritative block state and block-entity NBT |
+| `mc_server_entities` | `entities {player? \| x,y,z?, dimension?, radius?, type?, limit?}` | Entities around a player or point, or all loaded in a dimension |
+| `mc_server_wait_for` | `waitFor {condition,timeoutTicks?}` | `ticks:<n>`, `log:<text>`, `player:<name>`, `noplayer:<name>`, `players:<n>`, `block:<x,y,z>=<id>[@dim]`, `entity:<type>[@dim]` |
+| `mc_server_logs` | `logs {…}` | The server's captured log lines, same format as `mc_logs` |
+| `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status` | `time.*` | Tick freeze and exact stepping on the server |
+| `mc_server_gametest_list` / `_run` | `gametest.*` | The GameTest tools, on the dedicated server |
+| `mc_server_stop` | `stop` | Save and stop the server |
+| `mc_server_call` | any | Raw call to the server API |
 
 ### Playing like a player
 
@@ -208,6 +264,13 @@ terrain it succeeded on 4 of 5 seeds tried. The failures were terrain dead ends 
 of a hole with no exposed stone), which is where pathfinding that can place blocks (pillaring, bridging) would help.
 
 ### Things worth knowing
+
+- **Errors come to you.** After every tool call the MCP server checks the game's log for new ERROR lines and appends
+  them to the result, so an exception your mod throws shows up right after the action that caused it. `mc_logs` has
+  the full stacks. If the game crashes, the next call fails with a hint to use `mc_crash_report`.
+- **GameTests.** `mc_gametest_run {tests:"mymod:*"}` runs your mod's GameTests (registered through the Fabric or
+  NeoForge GameTest API) in the open world and returns each result, so an agent can write a GameTest, rebuild, and
+  check it in one loop. Use a flat test world: tests are placed near the world spawn.
 
 - **Keybind actions apply on the next tick.** `mc_key {key:"e"}` returns before the inventory opens. Follow it with
   `mc_wait_for {condition:"screen:InventoryScreen"}`.
@@ -278,7 +341,15 @@ scripts/   end-to-end test scripts
 Every game-state access hops to the render thread with `Minecraft.execute()` and completes a `CompletableFuture`;
 nothing blocks the render thread. Waits are checked on each client tick.
 
-Test suites (start a client first with `./gradlew :fabric:runClient` or `:neoforge:runClient`):
+One command builds and launches the client and a dedicated server for each loader, runs the suites below, and
+quits the game afterwards (game output in `build/test-logs/`):
+
+```bash
+node scripts/run-tests.mjs                          # both loaders, all default suites
+node scripts/run-tests.mjs fabric --suites step4,mcp
+```
+
+Or run a single suite against a client you started yourself (`./gradlew :fabric:runClient` or `:neoforge:runClient`):
 
 ```bash
 node scripts/ws-test.mjs              # status + screenshot smoke test
@@ -288,6 +359,7 @@ node scripts/play-test.mjs            # survival gameplay: walk, jump, place, mi
 node scripts/skills-test.mjs          # pathfinding, time freeze/step/lockstep, craft, collect, fight, dig
 node scripts/survival-test.mjs [seed] # no-cheats run on real terrain: punch trees -> stone pickaxe
 node scripts/cursor-test.mjs          # screens open/close without the game capturing your mouse (Windows)
+node scripts/server-test.mjs          # dedicated server: also start ./gradlew :<loader>:runServer first
 cd mcp && npm test                    # MCP server end to end over stdio
 ```
 

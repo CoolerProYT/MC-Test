@@ -39,6 +39,11 @@ public final class ChatCapture {
     public static final class Session {
         private final JsonArray lines = new JsonArray();
 
+        /** Lines so far, without closing. */
+        public JsonArray lines() {
+            return lines;
+        }
+
         public JsonArray close() {
             SESSIONS.remove(this);
             return lines;
