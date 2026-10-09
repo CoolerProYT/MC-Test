@@ -1,6 +1,8 @@
 package com.coolerpromc.mctest.methods;
 
+import com.coolerpromc.mctest.input.HeldKeys;
 import com.coolerpromc.mctest.input.InputGuard;
+import com.coolerpromc.mctest.mixin.AbstractContainerScreenAccessor;
 import com.coolerpromc.mctest.rpc.ClientThread;
 import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
@@ -60,13 +62,22 @@ public final class InputMethods {
             double y = Params.number(params, "y");
             int button = mouseButton(params);
             int mods = modifiers(params);
-            return ClientThread.call(() -> InputGuard.synthetic(() -> click(x, y, button, mods)));
+            return ClientThread.call(() -> InputGuard.synthetic(() -> HeldKeys.withModifiers(mods, () -> click(x, y, button, mods))));
         });
         RpcRegistry.register("clickWidget", params -> {
             String id = Params.string(params, "id");
             int button = mouseButton(params);
             int mods = modifiers(params);
-            return ClientThread.call(() -> InputGuard.synthetic(() -> clickWidget(id, button, mods)));
+            return ClientThread.call(() -> InputGuard.synthetic(() -> HeldKeys.withModifiers(mods, () -> clickWidget(id, button, mods))));
+        });
+        RpcRegistry.register("hover", params -> {
+            Integer slot = Params.has(params, "slot") ? Params.integer(params, "slot") : null;
+            Double x = Params.has(params, "x") ? Params.number(params, "x") : null;
+            Double y = Params.has(params, "y") ? Params.number(params, "y") : null;
+            if (slot == null && (x == null || y == null)) {
+                throw new RpcException("Give x and y, or a container slot index");
+            }
+            return ClientThread.call(() -> InputGuard.synthetic(() -> hover(slot, x, y)));
         });
         RpcRegistry.register("clickSlot", params -> {
             int index = Params.integer(params, "index");
@@ -124,6 +135,36 @@ public final class InputMethods {
         mc.mouseHandler.onButton(window.handle(), info, InputConstants.PRESS);
         mc.mouseHandler.onButton(window.handle(), info, InputConstants.RELEASE);
         return screenChange(before, mc.gui.screen());
+    }
+
+    /** Moves the mouse without clicking, e.g. so a screenshot shows a slot's tooltip. */
+    private static JsonElement hover(Integer slot, Double guiX, Double guiY) {
+        Minecraft mc = ClientThread.mc();
+        double x, y;
+        JsonObject out = new JsonObject();
+        if (slot != null) {
+            if (!(mc.gui.screen() instanceof AbstractContainerScreen<?> screen)) {
+                throw new RpcException("No container screen open (current: " + describe(mc.gui.screen()) + ")");
+            }
+            AbstractContainerMenu menu = screen.getMenu();
+            if (slot < 0 || slot >= menu.slots.size()) {
+                throw new RpcException("Slot index " + slot + " out of range 0.." + (menu.slots.size() - 1));
+            }
+            AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) screen;
+            // Slot positions are the top-left of the 16x16 item area.
+            x = acc.mctest$getLeftPos() + menu.slots.get(slot).x + 8;
+            y = acc.mctest$getTopPos() + menu.slots.get(slot).y + 8;
+            out.add("item", ScreenInspector.stack(menu.slots.get(slot).getItem()));
+        } else {
+            x = guiX;
+            y = guiY;
+        }
+        Window window = mc.getWindow();
+        mc.mouseHandler.onMove(window.handle(), x * window.getScreenWidth() / window.getGuiScaledWidth(),
+                y * window.getScreenHeight() / window.getGuiScaledHeight(), 0, 0);
+        out.addProperty("x", x);
+        out.addProperty("y", y);
+        return out;
     }
 
     private static JsonElement clickWidget(String id, int sdlButton, int mods) {
@@ -190,15 +231,35 @@ public final class InputMethods {
         long handle = mc.getWindow().handle();
         int keycode = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) mods, false);
         KeyEvent event = new KeyEvent(scancode, keycode, mods);
-        if (!action.equals("release")) {
-            mc.keyboardHandler.keyPress(handle, InputConstants.PRESS, event);
-        }
-        if (!action.equals("press")) {
-            mc.keyboardHandler.keyPress(handle, InputConstants.RELEASE, event);
-        }
+        // "press" keeps the key down (for hasShiftDown()-style polling) until a matching "release".
+        HeldKeys.withModifiers(mods, () -> {
+            if (!action.equals("release")) {
+                HeldKeys.press(scancode);
+                mc.keyboardHandler.keyPress(handle, InputConstants.PRESS, event);
+            }
+            if (!action.equals("press")) {
+                HeldKeys.release(scancode);
+                mc.keyboardHandler.keyPress(handle, InputConstants.RELEASE, event);
+            }
+            return null;
+        });
         JsonObject out = screenChange(before, mc.gui.screen());
         out.addProperty("key", InputConstants.Type.KEYBOARD.getOrCreate(scancode).getName());
+        out.add("heldKeys", heldKeys());
+        // What polling code (e.g. "hold shift for details" tooltips) sees now.
+        JsonObject down = new JsonObject();
+        down.addProperty("shift", mc.hasShiftDown());
+        down.addProperty("ctrl", mc.hasControlDown());
+        down.addProperty("alt", mc.hasAltDown());
+        out.add("modifiersDown", down);
         return out;
+    }
+
+    /** Names of the keys MCTest is currently holding down. */
+    public static JsonArray heldKeys() {
+        JsonArray arr = new JsonArray();
+        HeldKeys.held().stream().sorted().forEach(k -> arr.add(InputConstants.Type.KEYBOARD.getOrCreate(k).getName()));
+        return arr;
     }
 
     private static JsonElement type(String text) {
@@ -236,7 +297,7 @@ public final class InputMethods {
     }
 
     /** Accepts an array/comma list of shift/ctrl/alt/super, or a raw SDL modifier bitmask. */
-    private static int modifiers(JsonObject params) {
+    public static int modifiers(JsonObject params) {
         JsonElement m = params.get("modifiers");
         if (m == null || m.isJsonNull()) {
             return 0;

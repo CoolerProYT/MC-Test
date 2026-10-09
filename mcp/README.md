@@ -5,6 +5,7 @@ drives a browser. Use it to test your mods: create worlds, click GUIs, press key
 commands, inspect blocks, entities and inventories, read logs and take screenshots.
 
 It talks to the **MCTest** mod, a dev-only client mod (Fabric and NeoForge) that you add to your mod's dev runtime.
+Full documentation: https://mctest.coolerpromc.com/
 
 ## 1. Add the MCTest mod to your mod's dev client
 
@@ -16,7 +17,7 @@ repositories {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.0") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.2") { transitive = false }
 }
 ```
 
@@ -33,7 +34,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.0") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.2") { transitive = false }
 }
 ```
 
@@ -82,7 +83,7 @@ The server connects lazily and reconnects when the game restarts, so you can lea
 |---|---|
 | Lifecycle | `mc_status`, `mc_wait_ready`, `mc_world_create`, `mc_world_join`, `mc_world_leave`, `mc_world_list`, `mc_world_delete` |
 | Observe | `mc_screenshot` (returns the image, downscaled JPEG; full PNG on disk), `mc_window_resize`, `mc_snapshot` (widgets + container slots), `mc_player`, `mc_block`, `mc_entities`, `mc_scan_blocks`, `mc_tooltip`, `mc_logs`, `mc_keybinds` |
-| GUI input | `mc_click`, `mc_click_widget`, `mc_click_slot`, `mc_key`, `mc_type`, `mc_scroll`, `mc_close_screen` |
+| GUI input | `mc_click`, `mc_click_widget`, `mc_click_slot`, `mc_hover`, `mc_key`, `mc_type`, `mc_scroll`, `mc_close_screen` |
 | Gameplay | `mc_command`, `mc_chat`, `mc_keybind`, `mc_select_slot`, `mc_select_item`, `mc_look`, `mc_look_at`, `mc_teleport`, `mc_use_on`, `mc_use_item`, `mc_break_block`, `mc_attack_entity`, `mc_interact_entity`, `mc_reload_resources` |
 | Player skills | `mc_goto` (pathfinding walk), `mc_collect`, `mc_dig`, `mc_place`, `mc_fight`, `mc_craft` |
 | Time | `mc_time_freeze`, `mc_time_unfreeze`, `mc_time_step`, `mc_time_status`, `mc_lockstep` |

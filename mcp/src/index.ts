@@ -407,9 +407,13 @@ tool(
   { readOnly: true },
 );
 
-tool('mc_tooltip', 'tooltip', 'Tooltip lines of an item. slot = menu slot index (as in mc_snapshot) if a container screen is open, otherwise a player inventory index.', {
+tool('mc_tooltip', 'tooltip', 'Tooltip lines of an item. slot = menu slot index (as in mc_snapshot) if a container screen is open, otherwise a player inventory index. Pass modifiers (e.g. ["shift"]) for mods that show extra lines while shift/ctrl/alt is held.', {
   slot: z.number().int(),
   advanced: z.boolean().optional().describe('Advanced tooltips (item id, durability, component count)'),
+  modifiers: z
+    .array(z.enum(['shift', 'ctrl', 'alt', 'super']))
+    .optional()
+    .describe('Modifier keys held while the tooltip is built (Minecraft.hasShiftDown() etc. report them as down)'),
 }, { readOnly: true });
 
 tool('mc_keybinds', 'keybinds', 'All key mappings, including other mods\' (name like "key.forward", category, bound key, whether down).', {}, { readOnly: true });
@@ -462,11 +466,11 @@ tool(
 tool(
   'mc_key',
   'key',
-  'Press a keyboard key through the real keyboard handler (screens and keybinds react as to a real key). Names: a-z, 0-9, escape, enter, backspace, tab, space, up/down/left/right, f1-f12, left_shift, ... In-world keybinds (e.g. "e" opens the inventory) apply on the next tick.',
+  'Press a keyboard key through the real keyboard handler (screens and keybinds react as to a real key). Names: a-z, 0-9, escape, enter, backspace, tab, space, up/down/left/right, f1-f12, left_shift, ... In-world keybinds (e.g. "e" opens the inventory) apply on the next tick. action "press" keeps the key held (also for hasShiftDown()-style polling, e.g. hold-shift tooltips in screenshots) until action "release".',
   {
     key: z.string(),
     modifiers,
-    action: z.enum(['tap', 'press', 'release']).optional().describe('Default tap (press + release)'),
+    action: z.enum(['tap', 'press', 'release']).optional().describe('Default tap (press + release); press holds until release'),
   },
 );
 
@@ -477,6 +481,17 @@ tool('mc_scroll', 'scroll', 'Scroll the mouse wheel (positive = up), optionally 
   x: z.number().optional(),
   y: z.number().optional(),
 });
+
+tool(
+  'mc_hover',
+  'hover',
+  'Move the mouse without clicking, e.g. so mc_screenshot shows a slot tooltip. Give a container slot (menu index, as in mc_snapshot) or GUI-scaled x/y. For hold-shift tooltips, mc_key left_shift action "press" first, and "release" after.',
+  {
+    slot: z.number().int().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+  },
+);
 
 tool('mc_close_screen', 'closeScreen', 'Close the open screen (like pressing Escape).', {});
 

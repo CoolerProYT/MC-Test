@@ -1,5 +1,6 @@
 package com.coolerpromc.mctest.methods;
 
+import com.coolerpromc.mctest.input.HeldKeys;
 import com.coolerpromc.mctest.input.InputGuard;
 import com.coolerpromc.mctest.rpc.ClientThread;
 import com.coolerpromc.mctest.rpc.Params;
@@ -160,7 +161,8 @@ public final class ActionMethods {
         RpcRegistry.register("tooltip", params -> {
             int slot = Params.integer(params, "slot");
             boolean advanced = Params.bool(params, "advanced", false);
-            return ClientThread.call(() -> tooltip(slot, advanced));
+            int mods = InputMethods.modifiers(params);
+            return ClientThread.call(() -> HeldKeys.withModifiers(mods, () -> tooltip(slot, advanced)));
         });
         RpcRegistry.register("reloadResources", params -> ClientThread.callAsync(() -> {
             long start = System.currentTimeMillis();

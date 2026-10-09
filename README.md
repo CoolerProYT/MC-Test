@@ -5,6 +5,8 @@ coding agent, or your own scripts) can drive a running Minecraft client the way 
 worlds, click GUIs, press keys, walk, mine, place, craft, fight, run commands, inspect blocks, entities and inventories,
 read logs and take screenshots. The main use is testing your own mods.
 
+**Documentation: https://mctest.coolerpromc.com/**
+
 ```
 Claude Code ──stdio/MCP──▶ mcp/ (Node) ──WebSocket JSON-RPC──▶ MCTest mod in your dev client (127.0.0.1:25599)
 ```
@@ -36,7 +38,7 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.3.0.0") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.3.0.2") { transitive = false }
 }
 ```
 
@@ -59,7 +61,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.3.0.0") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.3.0.2") { transitive = false }
 }
 ```
 
@@ -174,8 +176,9 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_snapshot` | `snapshot` | Screen class/title, widgets (`index:Class:text` id, type, text, x/y/w/h, active, focused, visible, values), container slots (menu index, item, count, components, x/y), carried stack |
 | `mc_click` | `click {x,y,button?,modifiers?}` | Click at GUI coordinates through the real mouse handler |
 | `mc_click_widget` | `clickWidget {id}` | Click a widget's centre. Old ids still work if `Class:text` is unique |
+| `mc_hover` | `hover {slot \| x,y}` | Move the mouse without clicking (slot tooltips in screenshots) |
 | `mc_click_slot` | `clickSlot {index,button?,clickType?}` | Container click by menu slot index (`PICKUP`, `QUICK_MOVE`, `SWAP`, `CLONE`, `THROW`, `QUICK_CRAFT`, `PICKUP_ALL`) |
-| `mc_key` | `key {key,modifiers?,action?}` | Keyboard key through the real handler (`e`, `escape`, `enter`, `f3`, `left_shift`, …) |
+| `mc_key` | `key {key,modifiers?,action?}` | Keyboard key through the real handler (`e`, `escape`, `enter`, `f3`, `left_shift`, …); `press` holds it (seen by `hasShiftDown()`) until `release` |
 | `mc_type` | `type {text}` | Type into the focused text field |
 | `mc_scroll` | `scroll {amount,x?,y?}` | Mouse wheel (lists, or hotbar in-world) |
 | `mc_close_screen` | `closeScreen` | Close the current screen |
@@ -194,7 +197,7 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_break_block` | `breakBlock {x,y,z,face?,timeoutTicks?}` | Mine with real dig time (instant in creative) |
 | `mc_attack_entity` | `attackEntity {id}` | Attack an entity |
 | `mc_interact_entity` | `interactEntity {id,hand?}` | Right-click an entity (trade, milk, ride, mod entities) |
-| `mc_tooltip` | `tooltip {slot,advanced?}` | Tooltip lines of an item (menu slot if a container is open, else inventory slot) |
+| `mc_tooltip` | `tooltip {slot,advanced?,modifiers?}` | Tooltip lines of an item (menu slot if a container is open, else inventory slot); `modifiers: ["shift"]` for hold-shift/ctrl tooltips |
 | `mc_wait_for` | `waitFor {condition,timeoutTicks?}` | `screen:<Class>`/`screen:none`, `slot:<i>=<item\|empty>`, `block:<x,y,z>=<id>`, `ticks:<n>`, `state:<state>`, `log:<text>`, `chat:<text>`, `entity:<type>[@radius]` |
 | `mc_logs` | `logs {since?,level?,contains?,limit?}` | Captured log lines with exception stacks, paged by sequence number |
 | `mc_reload_resources` | `reloadResources` | Reload resource packs (F3+T) after editing assets |

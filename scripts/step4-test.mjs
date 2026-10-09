@@ -73,6 +73,12 @@ await check('key e + waitFor screen:InventoryScreen', async () => {
   return `${(await mc.call('waitFor', { condition: 'screen:InventoryScreen', timeoutTicks: 40 })).ticks} tick(s)`;
 });
 await check('waitFor screen:<superclass>', () => mc.call('waitFor', { condition: 'screen:AbstractContainerScreen' }).then(() => undefined));
+await check('hover a slot moves the mouse without clicking', async () => {
+  await mc.call('waitFor', { condition: 'slot:36=golden_apple' });
+  const r = await mc.call('hover', { slot: 36 });
+  const snap = await mc.call('snapshot');
+  assert(r.item?.item === 'minecraft:golden_apple' && !snap.container.carried, JSON.stringify({ r, carried: snap.container.carried }));
+});
 await check('waitFor slot:36=golden_apple, shift-click, slot:36=empty', async () => {
   await mc.call('waitFor', { condition: 'slot:36=golden_apple' });
   await mc.call('clickSlot', { index: 36, clickType: 'QUICK_MOVE' });
@@ -124,6 +130,19 @@ await check('logs: level filter + exceptions carry stacks', async () => {
   assert(r.lines.every((l) => ['WARN', 'ERROR', 'FATAL'].includes(l.level)), 'level filter leaked');
   const withStack = r.lines.find((l) => l.stack);
   return withStack ? `${withStack.exception.slice(0, 80)}...` : '(no exceptions logged this session)';
+});
+
+await check('key press holds shift for hasShiftDown() polling until release', async () => {
+  const pressed = await mc.call('key', { key: 'left_shift', action: 'press' });
+  assert(pressed.modifiersDown.shift && pressed.heldKeys.includes('key.keyboard.left.shift'), JSON.stringify(pressed));
+  const ctrl = await mc.call('key', { key: 'a', modifiers: ['ctrl'] });
+  assert(ctrl.modifiersDown.shift && !ctrl.modifiersDown.ctrl, `tap modifiers must not stick: ${JSON.stringify(ctrl)}`);
+  const released = await mc.call('key', { key: 'left_shift', action: 'release' });
+  assert(!released.modifiersDown.shift && released.heldKeys.length === 0, JSON.stringify(released));
+});
+await check('tooltip accepts modifiers', async () => {
+  const r = await mc.call('tooltip', { slot: 0, modifiers: ['shift'] });
+  assert(Array.isArray(r.lines), JSON.stringify(r));
 });
 
 await mc.call('world.leave');

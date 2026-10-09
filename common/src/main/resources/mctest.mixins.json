@@ -9,6 +9,7 @@
     "ChatComponentMixin",
     "MinecraftMixin",
     "KeyboardHandlerMixin",
+    "InputConstantsMixin",
     "MouseHandlerMixin",
     "DisconnectedScreenAccessor",
     "BackupConfirmScreenAccessor"
