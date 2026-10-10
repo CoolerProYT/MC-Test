@@ -28,6 +28,7 @@ public final class StatusMethods {
             if (Minecraft.getInstance() == null) {
                 JsonObject out = new JsonObject();
                 out.addProperty("state", "starting");
+                out.addProperty("pid", ProcessHandle.current().pid());
                 out.addProperty("ready", false);
                 return CompletableFuture.completedFuture(out);
             }
@@ -61,6 +62,7 @@ public final class StatusMethods {
         out.addProperty("loader", Services.PLATFORM.getPlatformName());
         out.addProperty("loaderVersion", Services.PLATFORM.getLoaderVersion());
         out.addProperty("gameDir", mc.gameDirectory.toPath().toAbsolutePath().normalize().toString());
+        out.addProperty("pid", ProcessHandle.current().pid());
 
         out.add("mods", Describe.mods());
         return out;

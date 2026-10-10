@@ -16,4 +16,5 @@ These talk to MCTest's API inside a dedicated server (`ws://127.0.0.1:25598/` by
 | `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status` | `time.*` | Tick freeze and exact stepping on the server |
 | `mc_server_gametest_list` / `_run` | `gametest.*` | The GameTest tools, on the dedicated server |
 | `mc_server_stop` | `stop` | Save and stop the server |
+| `mc_server_launch` | (runs gradle) | Start `./gradlew :<loader>:runServer` and track it; then `mc_server_wait_ready`. `mc_close_all` closes it |
 | `mc_server_call` | any | Raw call to the server API |

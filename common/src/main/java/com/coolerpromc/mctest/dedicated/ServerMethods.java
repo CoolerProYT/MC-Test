@@ -126,6 +126,7 @@ public final class ServerMethods {
         out.addProperty("loader", Services.PLATFORM.getPlatformName());
         out.addProperty("loaderVersion", Services.PLATFORM.getLoaderVersion());
         out.addProperty("gameDir", Services.PLATFORM.getGameDir().toAbsolutePath().normalize().toString());
+        out.addProperty("pid", ProcessHandle.current().pid());
         out.addProperty("controlPort", ControlServer.configuredServerPort());
         if (server != null) {
             out.addProperty("port", server.getPort());

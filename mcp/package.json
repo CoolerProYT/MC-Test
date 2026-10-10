@@ -1,6 +1,6 @@
 {
   "name": "mctest-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server that lets Claude Code and other AI agents drive a running Minecraft client (via the MCTest mod) to test mods",
   "keywords": [
     "mcp",

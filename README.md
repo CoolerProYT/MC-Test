@@ -107,7 +107,9 @@ To share it with everyone working on a mod, commit a `.mcp.json` in that mod's r
 ```
 
 The server connects lazily and reconnects after the game restarts, so it can be registered once and left running.
-Start your client with `./gradlew :fabric:runClient` (or `:neoforge:runClient`); the agent then calls `mc_wait_ready`.
+Start your client with `./gradlew :fabric:runClient` (or `:neoforge:runClient`), or let the agent start it with
+`mc_launch`; the agent then calls `mc_wait_ready`. When it has finished testing it calls `mc_close_all`, which closes
+every client and server; games started with `mc_launch` / `mc_server_launch` are also closed when the MCP session ends.
 
 To run the server from this checkout instead (when changing it): `cd mcp && npm install`, then register
 `node <path-to-checkout>/mcp/dist/index.js`. Publish a new version with `npm version patch && npm publish` from `mcp/`.
@@ -206,6 +208,8 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_world_leave` | `world.leave` | Save and quit to title, or disconnect from a server |
 | `mc_connect` | `connect {address?}` | Join a multiplayer server and wait until in-world; fails with the disconnect reason |
 | `mc_quit` | `quit` | Quit the game cleanly (saves first), e.g. to restart after rebuilding your mod |
+| `mc_launch` | (runs gradle) | Start `./gradlew :<loader>:runClient` and track it; then `mc_wait_ready` |
+| `mc_close_all` | `quit` / `stop`, then kill | Close every client and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
 | `mc_crash_report` | (reads files) | Newest crash report or JVM `hs_err` log of the client or server, also after the game has died |
 | `mc_gametest_list` | `gametest.list {filter?}` | GameTests registered in the singleplayer world (vanilla, your mod's, datapack test instances) |
 | `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (`/test run <selector>`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
@@ -240,6 +244,7 @@ Dedicated-server tools (the server's own API, port 25598):
 | `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status` | `time.*` | Tick freeze and exact stepping on the server |
 | `mc_server_gametest_list` / `_run` | `gametest.*` | The GameTest tools, on the dedicated server |
 | `mc_server_stop` | `stop` | Save and stop the server |
+| `mc_server_launch` | (runs gradle) | Start `./gradlew :<loader>:runServer` and track it; then `mc_server_wait_ready`. `mc_close_all` closes it |
 | `mc_server_call` | any | Raw call to the server API |
 
 ### Playing like a player

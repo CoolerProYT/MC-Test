@@ -69,7 +69,9 @@ Other MCP clients: run `npx -y mctest-mcp` as a stdio server.
 
 ## 3. Use it
 
-Start your client (`./gradlew :fabric:runClient` or `:neoforge:runClient`) and ask your agent to test something:
+Start your client (`./gradlew :fabric:runClient` or `:neoforge:runClient`), or let the agent start it with `mc_launch`,
+and ask your agent to test something. The agent closes every game with `mc_close_all` when it is done, and games it
+launched are closed when the MCP session ends:
 
 > Wait for the game, create a flat test world, give me a `mymod:grinder`, place it, put 8 iron ore in, wait 10 seconds
 > and check it produced iron dust. Screenshot the GUI.
@@ -81,7 +83,7 @@ The server connects lazily and reconnects when the game restarts, so you can lea
 
 | Area | Tools |
 |---|---|
-| Lifecycle | `mc_status`, `mc_wait_ready`, `mc_world_create`, `mc_world_join`, `mc_world_leave`, `mc_world_list`, `mc_world_delete` |
+| Lifecycle | `mc_launch`, `mc_close_all` (close every game when done), `mc_status`, `mc_wait_ready`, `mc_world_create`, `mc_world_join`, `mc_world_leave`, `mc_world_list`, `mc_world_delete` |
 | Observe | `mc_screenshot` (returns the image, downscaled JPEG; full PNG on disk), `mc_window_resize`, `mc_snapshot` (widgets + container slots), `mc_player`, `mc_block`, `mc_entities`, `mc_scan_blocks`, `mc_tooltip`, `mc_logs`, `mc_keybinds` |
 | GUI input | `mc_click`, `mc_click_widget`, `mc_click_slot`, `mc_hover`, `mc_key`, `mc_type`, `mc_scroll`, `mc_close_screen` |
 | Gameplay | `mc_command`, `mc_chat`, `mc_keybind`, `mc_select_slot`, `mc_select_item`, `mc_look`, `mc_look_at`, `mc_teleport`, `mc_use_on`, `mc_use_item`, `mc_break_block`, `mc_attack_entity`, `mc_interact_entity`, `mc_reload_resources` |
@@ -91,7 +93,7 @@ The server connects lazily and reconnects when the game restarts, so you can lea
 | Multiplayer | `mc_connect` (join a server), `mc_world_leave` (disconnect) |
 | GameTests | `mc_gametest_list`, `mc_gametest_run` (per-test pass/fail with failure messages) |
 | Crashes | `mc_crash_report` (newest crash report, also after the game died), `mc_quit` |
-| Dedicated server | `mc_server_wait_ready`, `mc_server_status`, `mc_server_command`, `mc_server_players`, `mc_server_block`, `mc_server_entities`, `mc_server_wait_for`, `mc_server_logs`, `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status`, `mc_server_stop`, `mc_server_call` |
+| Dedicated server | `mc_server_launch`, `mc_server_wait_ready`, `mc_server_status`, `mc_server_command`, `mc_server_players`, `mc_server_block`, `mc_server_entities`, `mc_server_wait_for`, `mc_server_logs`, `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status`, `mc_server_stop`, `mc_server_call` |
 | Anything else | `mc_call` (raw method call) |
 
 Notes:

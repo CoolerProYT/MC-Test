@@ -19,6 +19,8 @@ same thing over the [raw protocol](/reference/protocol). Coordinates in GUI tool
 | `mc_world_delete` | `world.delete {name}` | Delete a world (not the open one) |
 | `mc_connect` | `connect {address?}` | Join a multiplayer server and wait until in-world; fails with the disconnect reason |
 | `mc_quit` | `quit` | Quit the game cleanly (saves first), e.g. to restart after rebuilding your mod |
+| `mc_launch` | (runs gradle) | Start `./gradlew :<loader>:runClient` and track it; then `mc_wait_ready` |
+| `mc_close_all` | `quit` / `stop`, then kill | Close every client and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
 | `mc_crash_report` | (reads files) | Newest crash report or JVM `hs_err` log of the client or server, also after the game has died |
 
 ## Observing

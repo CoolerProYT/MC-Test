@@ -7,6 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { MCTestClient, RemoteError } from './client.js';
+import { Launcher, type Side } from './launcher.js';
 
 const port = Number(process.env.MCTEST_PORT ?? 25599);
 const mc = new MCTestClient(port);
@@ -16,9 +17,10 @@ const srv = new MCTestClient(
   'Minecraft dedicated server not reachable at {url} ({error}). Start it with ./gradlew :fabric:runServer or ' +
     ':neoforge:runServer (with MCTest on the runtime classpath), then call mc_server_wait_ready.',
 );
+const launcher = new Launcher({ client: mc, server: srv });
 
 const INSTRUCTIONS = `Drive a running Minecraft (26.x) client like Playwright drives a browser.
-Typical flow: mc_wait_ready -> mc_world_create (flat:true for a clean test world) -> act -> verify -> mc_screenshot when visuals matter.
+Typical flow: mc_launch {loader} (or use an already running client) -> mc_wait_ready -> mc_world_create (flat:true for a clean test world) -> act -> verify -> mc_screenshot when visuals matter.
 - GUI: mc_snapshot lists widgets (stable id "index:Class:text") and container slots; prefer mc_click_widget over raw mc_click. Coordinates are GUI-scaled.
 - Keybind-driven actions (opening the inventory with key "e", chat with "t") take effect on the next client tick: follow with mc_wait_for (e.g. "screen:InventoryScreen").
 - Gameplay: mc_keybind (hold forward/jump/sneak for N ticks), mc_use_on / mc_break_block / mc_use_item / mc_attack_entity / mc_interact_entity act exactly like a player (server-validated reach and permissions).
@@ -26,9 +28,11 @@ Typical flow: mc_wait_ready -> mc_world_create (flat:true for a clean test world
 - mc_command runs any command (worlds made by mc_world_create have cheats on) and returns its chat output.
 - Player skills: mc_goto (pathfinding walk), mc_collect (walk + mine visible blocks with the best tool + pick up drops), mc_dig (staircase down / tunnel), mc_place, mc_fight (melee with proper attack cooldowns), mc_craft (recipe book; opens the inventory or walks to a crafting table), mc_select_item, mc_scan_blocks.
 - For survival play, enable mc_lockstep: the world freezes while you think and only runs while an action is in progress, so mobs can't act between your calls.
-- Dedicated server (multiplayer) tests: start the server (./gradlew :<loader>:runServer) and the client, mc_server_wait_ready + mc_wait_ready, then mc_connect. The mc_server_* tools talk to the server itself: mc_server_command runs console commands (full permissions), mc_server_players / mc_server_block / mc_server_entities show the authoritative server state, mc_server_wait_for waits on server-side conditions, mc_server_logs reads the server log. Client tools keep driving the player. Compare client and server views to catch sync bugs.
+- Dedicated server (multiplayer) tests: start the server (mc_server_launch) and the client (mc_launch), mc_server_wait_ready + mc_wait_ready, then mc_connect. The mc_server_* tools talk to the server itself: mc_server_command runs console commands (full permissions), mc_server_players / mc_server_block / mc_server_entities show the authoritative server state, mc_server_wait_for waits on server-side conditions, mc_server_logs reads the server log. Client tools keep driving the player. Compare client and server views to catch sync bugs.
 - GameTests: mc_gametest_run {tests:"mymod:*"} runs your mod's GameTests and reports each result (mc_server_gametest_run on a dedicated server).
 - Errors logged by the game are appended to tool results automatically. If the game died, mc_crash_report shows why; mc_quit closes it cleanly.
+- Start games with mc_launch / mc_server_launch rather than running gradle yourself, so they are tracked.
+- ALWAYS call mc_close_all when you have finished testing (also after failures): it quits every Minecraft client and dedicated server (saving worlds) and kills any that hang. Games launched here are also closed when this MCP server shuts down.
 - 20 ticks = 1 second.`;
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -56,6 +60,7 @@ const errorCursor = new Map<MCTestClient, number>();
 
 function remember(client: MCTestClient, result: any) {
   if (result && typeof result.gameDir === 'string') gameDirs.set(client, result.gameDir);
+  if (result && 'pid' in result) launcher.notePid(client === srv ? 'server' : 'client', result.pid);
 }
 
 /**
@@ -167,6 +172,8 @@ server.registerTool(
     const deadline = Date.now() + (timeoutSeconds ?? 300) * 1000;
     let last = 'not connected';
     while (Date.now() < deadline) {
+      const died = launcher.failedStart('client');
+      if (died) return errorResult(new Error(died));
       try {
         const s = await mc.call('status', {}, 10_000, 1_000);
         remember(mc, s);
@@ -704,6 +711,8 @@ server.registerTool(
     const deadline = Date.now() + (timeoutSeconds ?? 300) * 1000;
     let last = 'not connected';
     while (Date.now() < deadline) {
+      const died = launcher.failedStart('server');
+      if (died) return errorResult(new Error(died));
       try {
         const s = await srv.call('status', {}, 10_000, 1_000);
         remember(srv, s);
@@ -833,6 +842,63 @@ server.registerTool(
   },
 );
 
+// ---------------------------------------------------------------- launching / closing games
+
+const launchShape = {
+  loader: z.enum(['fabric', 'neoforge']).describe('Which loader subproject to run'),
+  projectDir: z
+    .string()
+    .optional()
+    .describe('Gradle project of the mod (default MCTEST_PROJECT_DIR, else the directory this MCP server runs in)'),
+  task: z.string().optional().describe('Gradle task to run instead of :<loader>:runClient / :<loader>:runServer'),
+  args: z.array(z.string()).optional().describe('Extra gradle arguments'),
+};
+
+function registerLaunch(name: string, side: Side, waitTool: string) {
+  server.registerTool(
+    name,
+    {
+      description:
+        `Start a Minecraft ${side === 'client' ? 'client' : 'dedicated server'} with gradle (./gradlew :<loader>:${side === 'client' ? 'runClient' : 'runServer'}) and track it, so mc_close_all ` +
+        `(and the end of this MCP session) closes it again. Returns right away; then call ${waitTool}. Gradle output goes to <projectDir>/build/mctest-logs/.`,
+      inputSchema: launchShape,
+      annotations: { readOnlyHint: false, openWorldHint: false },
+    },
+    async ({ loader, projectDir, task, args }) => {
+      try {
+        const l = await launcher.launch(side, loader, projectDir, task, args ?? []);
+        return text({ launched: l.task, side, projectDir: l.projectDir, log: l.log, next: `call ${waitTool}`, reminder: 'call mc_close_all when testing is done' });
+      } catch (e) {
+        return errorResult(e);
+      }
+    },
+  );
+}
+registerLaunch('mc_launch', 'client', 'mc_wait_ready');
+registerLaunch('mc_server_launch', 'server', 'mc_server_wait_ready');
+
+server.registerTool(
+  'mc_close_all',
+  {
+    description:
+      'Close every Minecraft client and dedicated server: quits them through MCTest (worlds are saved), waits for them to exit and kills any that hang, ' +
+      'plus the gradle runs that started them. Call this whenever you have finished testing, also after a failed test.',
+    inputSchema: {
+      all: z.boolean().optional().describe('Also close MCTest games this session did not launch itself (default true)'),
+      graceSeconds: z.number().positive().optional().describe('How long to wait for a clean exit before killing (default 60)'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  },
+  async ({ all, graceSeconds }) => {
+    try {
+      const report = await launcher.closeAll(all ?? true, (graceSeconds ?? 60) * 1000);
+      return text({ closed: report.length ? report : ['nothing was running'] });
+    } catch (e) {
+      return errorResult(e);
+    }
+  },
+);
+
 // ---------------------------------------------------------------- escape hatch
 
 server.registerTool(
@@ -850,4 +916,24 @@ server.registerTool(
   },
 );
 
-await server.connect(new StdioServerTransport());
+// Close the games this session launched when the MCP client goes away (stdin closes or we are signalled).
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (launcher.hasLiveGames()) {
+    // Quick clean quit, then kill; MCP clients do not wait long for a server to exit.
+    await Promise.race([launcher.closeAll(false, 8_000).catch(() => undefined), new Promise((r) => setTimeout(r, 15_000))]);
+  }
+  process.exit(0);
+}
+process.on('exit', () => launcher.killAllSync());
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('SIGHUP', shutdown);
+process.stdin.on('end', shutdown);
+process.stdin.on('close', shutdown);
+
+const transport = new StdioServerTransport();
+transport.onclose = () => void shutdown();
+await server.connect(transport);

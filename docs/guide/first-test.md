@@ -30,7 +30,11 @@ mc_wait_ready → mc_world_create {name:"grinder-test", flat:true}
 
 ## After changing your mod
 
-Rebuilding needs a restart: `mc_quit` closes the game cleanly, then start `runClient` again and call `mc_wait_ready`.
+Rebuilding needs a restart: `mc_quit` closes the game cleanly, then start `runClient` again (or `mc_launch`) and call
+`mc_wait_ready`.
+
+When the test is finished, `mc_close_all` quits every client and dedicated server (worlds are saved first) and kills
+any that hang. Games started with `mc_launch` / `mc_server_launch` are also closed when the MCP session ends.
 Asset-only changes don't need one: `mc_reload_resources` is F3+T.
 
 If the game crashes, the next call fails with a hint to use `mc_crash_report`, which reads the newest crash report or
