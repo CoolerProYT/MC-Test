@@ -221,10 +221,10 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_time_status` | `time.status` | Frozen / lockstep state and game time |
 | `mc_goto` | `goto {x,y,z \| entity, range?, sprint?}` | Walk there like a player: A* pathfinding, gradual turning, sprinting, jumping, drops, swimming, replanning |
 | `mc_collect` | `collect {block, count, radius?}` | Walk to visible matching blocks, use the best tool, mine with real dig time, pick up the drops; counts only what reached the inventory |
-| `mc_dig` | `dig {mode, length, direction?, until?}` | Staircase down (`stairs`), staircase up (`up`), or 1×2 `tunnel`; stops at lava/water, your own blocks, or the `until` block |
+| `mc_dig` | `dig {mode, length, direction?, until?}` | Staircase down (`stairs`), staircase up (`up`), or 1Ã—2 `tunnel`; stops at lava/water, your own blocks, or the `until` block |
 | `mc_place` | `place {item, x?,y?,z?}` | Place a block against any solid face; picks a sensible nearby spot if no position is given |
 | `mc_fight` | `fight {id \| type, fleeHealth?}` | Equip a weapon, close in, aim, attack only at full cooldown |
-| `mc_craft` | `craft {item, times?}` | Recipe-book crafting: 2×2 in the inventory, 3×3 by walking to and opening a nearby crafting table |
+| `mc_craft` | `craft {item, times?}` | Recipe-book crafting: 2Ã—2 in the inventory, 3Ã—3 by walking to and opening a nearby crafting table |
 | `mc_select_item` | `selectItem {item}` | Hold an item (swaps it into the hotbar if needed) |
 | `mc_scan_blocks` | `scanBlocks {radius?, blocks?}` | Block types around you with counts and nearest positions (ids or `#tags`) |
 | `mc_call` | any | Escape hatch: call a method by name with raw params |
@@ -254,7 +254,7 @@ survival-style tests of your mod. They are not shortcuts:
 
 - **Movement.** `mc_goto` never teleports. It plans a path (walk, diagonal, 1-block jumps, drops of up to 3 blocks,
   swimming; it avoids lava, fire, magma, cactus and berry bushes), then steers with the real movement keybinds. The
-  camera turns at most 40° per tick, it sprints on straight stretches, and it replans when stuck.
+  camera turns at most 40Â° per tick, it sprints on straight stretches, and it replans when stuck.
 - **Mining.** `mc_collect` only targets blocks a player could see (an exposed face, in line of sight), prefers walls
   over floors, never digs out the block you stand on or the steps of a staircase you dug, and refuses up front if
   nothing in your inventory can harvest the block. Drops are walked over and picked up.
