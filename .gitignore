@@ -26,3 +26,4 @@ runs
 # MCP server
 mcp/node_modules
 mcp/dist
+.claude
