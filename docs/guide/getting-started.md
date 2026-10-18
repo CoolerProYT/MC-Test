@@ -21,7 +21,9 @@ Latest releases (updated automatically from the Maven repository; use the one fo
 <!-- mctest-versions:start -->
 | Minecraft | Fabric | NeoForge |
 |---|---|---|
-| 26.3 | `26.3.0.3` | `26.3.0.3` |
+| 26.3 | `mctest-fabric-26.3:26.3.0.3` | `mctest-neoforge-26.3:26.3.0.3` |
+| 26.2 | `mctest-fabric-26.2:26.2.0.1` | `mctest-neoforge-26.2:26.2.0.1` |
+| 26.1.2 | `mctest-fabric-26.1.2:26.1.2.1` | `mctest-neoforge-26.1.2:26.1.2.1` |
 <!-- mctest-versions:end -->
 
 ::: code-group
