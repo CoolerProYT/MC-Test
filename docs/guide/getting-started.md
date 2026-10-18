@@ -14,8 +14,7 @@ Claude Code ──stdio/MCP──▶ mctest-mcp (Node) ──WebSocket JSON-RPC�
 ## 1. Add the mod to your mod's dev runtime
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-fabric-26.1:<version>` and `com.coolerpromc.mctest:mctest-neoforge-26.1:<version>`.
-One build covers 26.1, 26.1.1 and 26.1.2, so the snippets name `26.1` instead of using `${minecraft_version}`.
+`com.coolerpromc.mctest:mctest-fabric-26.1.2:<version>` and `com.coolerpromc.mctest:mctest-neoforge-26.1.2:<version>`.
 
 Latest releases (updated automatically from the Maven repository; use the one for your Minecraft version):
 
@@ -23,6 +22,8 @@ Latest releases (updated automatically from the Maven repository; use the one fo
 | Minecraft | Fabric | NeoForge |
 |---|---|---|
 | 26.3 | `26.3.0.3` | `26.3.0.3` |
+| 26.2 | `26.2.0.1` | `26.2.0.1` |
+| 26.1.2 | `26.1.2.1` | `26.1.2.1` |
 <!-- mctest-versions:end -->
 
 ::: code-group
@@ -34,7 +35,7 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.1:26.1.0.1") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.1.2.1") { transitive = false }
 }
 ```
 
@@ -50,7 +51,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.1:26.1.0.1") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.1.2.1") { transitive = false }
 }
 ```
 

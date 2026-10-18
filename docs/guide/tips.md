@@ -28,7 +28,7 @@ screen class). `screen:` in `mc_wait_for` also matches superclasses, for example
 
 `mc_key {key: "e"}` returns before the inventory opens. Follow it with `mc_wait_for {condition: "screen:InventoryScreen"}`.
 
-## Input is GLFW in 26.1
+## Input is GLFW in 26.1.2
 
 Raw key numbers for `mc_key` are GLFW key codes (26.3 and newer use SDL scancodes). Use names (`e`, `escape`, `left_shift`, `f3`).
 
