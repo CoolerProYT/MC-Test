@@ -1,6 +1,6 @@
 # mctest-mcp
 
-An MCP server that lets Claude Code, or any other MCP client, drive a running Minecraft (26.x) client the way Playwright
+An MCP server that lets Claude Code, or any other MCP client, drive a running Minecraft client (Fabric, NeoForge or Forge) the way Playwright
 drives a browser. Use it to test your mods: create worlds, click GUIs, press keys, walk, mine, craft, fight, run
 commands, inspect blocks, entities and inventories, read logs and take screenshots.
 
@@ -17,7 +17,7 @@ repositories {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.2") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.3") { transitive = false }
 }
 ```
 
@@ -34,7 +34,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.2") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.3") { transitive = false }
 }
 ```
 
@@ -69,7 +69,7 @@ Other MCP clients: run `npx -y mctest-mcp` as a stdio server.
 
 ## 3. Use it
 
-Start your client (`./gradlew :fabric:runClient` or `:neoforge:runClient`), or let the agent start it with `mc_launch`,
+Start your client (`./gradlew :fabric:runClient`, `:neoforge:runClient` or `:forge:runClient`), or let the agent start it with `mc_launch`,
 and ask your agent to test something. The agent closes every game with `mc_close_all` when it is done, and games it
 launched are closed when the MCP session ends:
 

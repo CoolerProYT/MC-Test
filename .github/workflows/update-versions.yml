@@ -1,0 +1,62 @@
+# Keeps the MCTest versions in the README, the docs and the skill in sync with the Maven repository
+# (scripts/update-versions.mjs), on every Minecraft version branch.
+#
+# Scheduled workflows only run from the default branch, so this one job visits every branch whose name is a
+# Minecraft version (26.3, 1.21.1, 1.20.1, ...): new backport branches are picked up without editing this file.
+# Run it by hand after publishing a release: Actions > Update versions > Run workflow (or `gh workflow run
+# update-versions.yml`).
+name: Update versions
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: update-versions
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update each version branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Use the script from the default branch, so older branches don't need their own copy.
+          cp scripts/update-versions.mjs "$RUNNER_TEMP/update-versions.mjs"
+
+          for branch in $(git branch -r --format='%(refname:lstrip=3)' | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$'); do
+            echo "::group::$branch"
+            git checkout -q -B "$branch" "origin/$branch"
+            # The script resolves its files from its own location, so run it from the checkout.
+            cp "$RUNNER_TEMP/update-versions.mjs" scripts/update-versions.mjs
+            node scripts/update-versions.mjs
+            git checkout -q -- scripts/update-versions.mjs 2>/dev/null || rm -f scripts/update-versions.mjs
+            if git diff --quiet; then
+              echo "$branch is up to date"
+            else
+              git commit -q -am "Update MCTest versions from Maven"
+              git push -q origin "$branch"
+              # Pushes made with GITHUB_TOKEN don't start other workflows, so redeploy the docs explicitly.
+              if [ "$branch" = "$DEFAULT_BRANCH" ]; then gh workflow run docs.yml --ref "$branch"; fi
+            fi
+            git clean -qfd
+            echo "::endgroup::"
+          done

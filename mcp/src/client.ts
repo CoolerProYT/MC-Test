@@ -22,7 +22,7 @@ export class MCTestClient {
   constructor(
     readonly port: number,
     private readonly notReachableHint = 'Minecraft client not reachable at {url} ({error}). ' +
-      'Start it with ./gradlew :fabric:runClient or :neoforge:runClient (with MCTest on the runtime classpath), ' +
+      'Start it with ./gradlew :<loader>:runClient (fabric, neoforge or forge; with MCTest on the runtime classpath), ' +
       'then call mc_wait_ready.',
   ) {}
 

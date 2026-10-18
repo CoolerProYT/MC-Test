@@ -29,6 +29,14 @@ MCTest is published to `https://maven.coolerpromc.com/releases/` as
 The snippets below use that repository. If you're changing MCTest itself, run `./gradlew publishToMavenLocal` and use
 `mavenLocal()` instead to pick up your local build.
 
+Latest releases (updated automatically from the Maven repository; use the one for your Minecraft version):
+
+<!-- mctest-versions:start -->
+| Minecraft | Fabric | NeoForge |
+|---|---|---|
+| 26.3 | `26.3.0.3` | `26.3.0.3` |
+<!-- mctest-versions:end -->
+
 ### Fabric (Loom), in your mod's `fabric/build.gradle`
 
 ```groovy
@@ -38,7 +46,7 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.3.0.2") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.3.0.3") { transitive = false }
 }
 ```
 
@@ -61,7 +69,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.3.0.2") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.3.0.3") { transitive = false }
 }
 ```
 

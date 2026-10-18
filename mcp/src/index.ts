@@ -14,12 +14,12 @@ const mc = new MCTestClient(port);
 const serverPort = Number(process.env.MCTEST_SERVER_PORT ?? 25598);
 const srv = new MCTestClient(
   serverPort,
-  'Minecraft dedicated server not reachable at {url} ({error}). Start it with ./gradlew :fabric:runServer or ' +
-    ':neoforge:runServer (with MCTest on the runtime classpath), then call mc_server_wait_ready.',
+  'Minecraft dedicated server not reachable at {url} ({error}). Start it with ./gradlew :<loader>:runServer ' +
+    '(fabric, neoforge or forge; with MCTest on the runtime classpath), then call mc_server_wait_ready.',
 );
 const launcher = new Launcher({ client: mc, server: srv });
 
-const INSTRUCTIONS = `Drive a running Minecraft (26.x) client like Playwright drives a browser.
+const INSTRUCTIONS = `Drive a running Minecraft client (Fabric, NeoForge or Forge, with the MCTest mod) like Playwright drives a browser.
 Typical flow: mc_launch {loader} (or use an already running client) -> mc_wait_ready -> mc_world_create (flat:true for a clean test world) -> act -> verify -> mc_screenshot when visuals matter.
 - GUI: mc_snapshot lists widgets (stable id "index:Class:text") and container slots; prefer mc_click_widget over raw mc_click. Coordinates are GUI-scaled.
 - Keybind-driven actions (opening the inventory with key "e", chat with "t") take effect on the next client tick: follow with mc_wait_for (e.g. "screen:InventoryScreen").
@@ -845,7 +845,9 @@ server.registerTool(
 // ---------------------------------------------------------------- launching / closing games
 
 const launchShape = {
-  loader: z.enum(['fabric', 'neoforge']).describe('Which loader subproject to run'),
+  loader: z
+    .enum(['fabric', 'neoforge', 'forge'])
+    .describe('Which loader subproject to run (:<loader>:runClient / :<loader>:runServer). For a single-loader project pass task, e.g. "runClient"'),
   projectDir: z
     .string()
     .optional()

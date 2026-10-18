@@ -27,3 +27,7 @@ runs
 mcp/node_modules
 mcp/dist
 .claude
+
+# Private: the paid agent skill and its packaging script (sold separately, not open source)
+skill/
+scripts/package-skill.mjs
