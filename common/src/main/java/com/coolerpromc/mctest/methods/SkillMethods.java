@@ -988,7 +988,7 @@ public final class SkillMethods {
                 p.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, hit);
                 var result = mc.gameMode.useItemOn(p, InteractionHand.MAIN_HAND, new BlockHitResult(hit, face, support, false));
                 if (!result.consumesAction()) continue;
-                p.swing(InteractionHand.MAIN_HAND, p.getMainHandItem().getInteractAnimation(), false);
+                p.swing(InteractionHand.MAIN_HAND);
                 CompletableFuture<JsonElement> out = new CompletableFuture<>();
                 waitTicks(2).thenRun(() -> {
                     JsonObject o = new JsonObject();

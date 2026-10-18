@@ -11,6 +11,8 @@
     "KeyboardHandlerMixin",
     "InputConstantsMixin",
     "MouseHandlerMixin",
+    "KeyboardHandlerInvoker",
+    "MouseHandlerInvoker",
     "DisconnectedScreenAccessor",
     "BackupConfirmScreenAccessor"
   ],

@@ -22,7 +22,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+import com.coolerpromc.mctest.mixin.MouseHandlerInvoker;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
@@ -382,14 +382,13 @@ public final class ActionMethods {
 
     /** What vanilla does after a left-click attack or dig tick. */
     static void attackSwing(LocalPlayer p) {
-        p.swing(InteractionHand.MAIN_HAND, p.getMainHandItem().getAttackAnimation(), false);
-        p.connection.send(ServerboundPunchPacket.INSTANCE);
+        p.swing(InteractionHand.MAIN_HAND);
     }
 
     /** What vanilla does after a right-click whose result the client predicted. */
     private static void swingIfPredicted(LocalPlayer p, InteractionHand hand, InteractionResult result) {
-        if (result instanceof InteractionResult.Success success && success.swingSource() == InteractionResult.SwingSource.PREDICTED) {
-            p.swing(hand, p.getItemInHand(hand).getInteractAnimation(), false);
+        if (result instanceof InteractionResult.Success success && success.swingSource() == InteractionResult.SwingSource.CLIENT) {
+            p.swing(hand);
         }
     }
 
@@ -399,11 +398,11 @@ public final class ActionMethods {
         Minecraft mc = ClientThread.mc();
         Window window = mc.getWindow();
         if (guiX != null && guiY != null) {
-            mc.mouseHandler.onMove(window.handle(), guiX * window.getScreenWidth() / window.getGuiScaledWidth(),
-                    guiY * window.getScreenHeight() / window.getGuiScaledHeight(), 0, 0);
+            ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), guiX * window.getScreenWidth() / window.getGuiScaledWidth(),
+                    guiY * window.getScreenHeight() / window.getGuiScaledHeight());
         }
         // Positive = scroll up (wheel away from you), as in vanilla.
-        mc.mouseHandler.onScroll(window.handle(), 0, amount);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onScroll(window.handle(), 0, amount);
         JsonObject out = new JsonObject();
         out.addProperty("scrolled", amount);
         if (mc.player != null) out.addProperty("selectedSlot", mc.player.getInventory().getSelectedSlot());

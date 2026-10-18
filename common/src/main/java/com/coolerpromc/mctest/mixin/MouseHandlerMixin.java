@@ -5,7 +5,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.MouseHandler;
 import net.minecraft.client.input.MouseButtonInfo;
-import org.lwjgl.sdl.SDLMouse;
+import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -36,13 +36,13 @@ public abstract class MouseHandlerMixin {
     }
 
     @Redirect(method = "releaseMouse()V", at = @At(value = "INVOKE",
-            target = "Lcom/mojang/blaze3d/platform/InputConstants;releaseMouse(Lcom/mojang/blaze3d/platform/Window;DD)V"))
-    private void mctest$releaseWithoutWarp(Window window, double x, double y) {
+            target = "Lcom/mojang/blaze3d/platform/InputConstants;grabOrReleaseMouse(Lcom/mojang/blaze3d/platform/Window;IDD)V"))
+    private void mctest$releaseWithoutWarp(Window window, int cursorMode, double x, double y) {
         if (InputGuard.userIsActive() && window.isFocused()) {
-            InputConstants.releaseMouse(window, x, y);
+            InputConstants.grabOrReleaseMouse(window, cursorMode, x, y);
         } else {
-            // Same as vanilla minus moving your cursor: just leave relative (captured) mode.
-            SDLMouse.SDL_SetWindowRelativeMouseMode(window.handle(), false);
+            // Same as vanilla minus moving your cursor: just show the normal cursor again.
+            GLFW.glfwSetInputMode(window.handle(), GLFW.GLFW_CURSOR, cursorMode);
         }
     }
 }

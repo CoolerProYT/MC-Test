@@ -9,7 +9,7 @@
 // Suites: ws, step4, step5, play, skills, mcp, server. Not run by default: survival (terrain-dependent, slow) and
 // cursor (moves your real mouse). Name them with --suites to run them. Game output goes to build/test-logs/.
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connect } from './lib.mjs';
@@ -101,11 +101,20 @@ async function shutdown(child, port, method) {
   await kill(child);
 }
 
-function runSuite(name) {
-  const [cmd, cmdArgs, dir] = SUITE_CMD[name];
+/** The dev server's game port (another server on 25565 is common, so the run config may use a different one). */
+function serverAddress(loader) {
+  const props = join(root, loader, 'runs', 'server', 'server.properties');
+  const port = existsSync(props) ? /^server-port=(\d+)/m.exec(readFileSync(props, 'utf8'))?.[1] : null;
+  return port && port !== '25565' ? `localhost:${port}` : 'localhost';
+}
+
+function runSuite(name, loader) {
+  const [cmd, baseArgs, dir] = SUITE_CMD[name];
+  const cmdArgs = name === 'server' ? [...baseArgs, serverAddress(loader)] : baseArgs;
+  const env = { ...process.env, MCTEST_TEST_ADDRESS: serverAddress(loader) };
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = run(cmd === 'node' ? process.execPath : cmd, cmdArgs, { cwd: join(root, dir ?? ''), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = run(cmd === 'node' ? process.execPath : cmd, cmdArgs, { cwd: join(root, dir ?? ''), env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));
@@ -132,7 +141,7 @@ for (const loader of loaders.length ? loaders : ['fabric', 'neoforge']) {
     for (const suite of suites) {
       if (suite === 'server' && !server) continue;
       process.stdout.write(`  ${suite.padEnd(9)} `);
-      const r = await runSuite(suite);
+      const r = await runSuite(suite, loader);
       results.push({ loader, ...r });
       console.log(`${r.ok ? 'PASS' : 'FAIL'} (${r.seconds}s)`);
       for (const f of r.failures) console.log(`      ${f}`);
