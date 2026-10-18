@@ -14,7 +14,9 @@ Claude Code ──stdio/MCP──▶ mctest-mcp (Node) ──WebSocket JSON-RPC�
 ## 1. Add the mod to your mod's dev runtime
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-fabric-26.3:<version>` and `com.coolerpromc.mctest:mctest-neoforge-26.3:<version>`.
+`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 26.1 to 26.3. The snippets
+below are for 26.3; the 26.1 build covers 26.1, 26.1.1 and 26.1.2, so for those write `mctest-fabric-26.1` /
+`mctest-neoforge-26.1` instead of `${minecraft_version}`.
 
 Latest releases (updated automatically from the Maven repository; use the one for your Minecraft version):
 

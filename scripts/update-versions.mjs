@@ -74,7 +74,9 @@ function table(versions) {
 }
 
 const versions = await publishedVersions();
-const branchMc = /^minecraft_version=(.+)$/m.exec(readFileSync(join(root, 'gradle.properties'), 'utf8'))?.[1]?.trim();
+// The Minecraft version in this branch's artifact names (artifact_minecraft_version, else minecraft_version).
+const props = readFileSync(join(root, 'gradle.properties'), 'utf8');
+const branchMc = (/^artifact_minecraft_version=(.+)$/m.exec(props) ?? /^minecraft_version=(.+)$/m.exec(props))?.[1]?.trim();
 
 const SNIPPET = new RegExp(`(mctest-(${LOADERS.join('|')})-(\\$\\{minecraft_version\\}|[0-9][\\w.]*):)([0-9][\\w.+-]*)`, 'g');
 const TABLE = /(<!-- mctest-versions:start -->)[\s\S]*?(<!-- mctest-versions:end -->)/g;

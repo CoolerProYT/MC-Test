@@ -142,7 +142,7 @@ if (!srvStatus.isError || process.env.MCTEST_TEST_SERVER) {
     return ` -> ${srvJson.state}, ${srvJson.players.length} online`;
   });
   await check('mc_connect + mc_server_players + mc_server_command', async () => {
-    const { r, text } = await call('mc_connect', { address: 'localhost' });
+    const { r, text } = await call('mc_connect', { address: process.env.MCTEST_TEST_ADDRESS ?? 'localhost' });
     assert(!r.isError, text);
     const me = (await call('mc_player')).json.name;
     const { json } = await call('mc_server_players');
