@@ -3,7 +3,9 @@
   "minVersion": "0.8",
   "package": "com.coolerpromc.mctest.mixin",
   "compatibilityLevel": "JAVA_25",
-  "mixins": [],
+  "mixins": [
+    "GameTestInfoAccessor"
+  ],
   "client": [
     "AbstractContainerScreenAccessor",
     "ChatComponentMixin",
@@ -11,6 +13,8 @@
     "KeyboardHandlerMixin",
     "InputConstantsMixin",
     "MouseHandlerMixin",
+    "KeyboardHandlerInvoker",
+    "MouseHandlerInvoker",
     "DisconnectedScreenAccessor",
     "BackupConfirmScreenAccessor"
   ],

@@ -154,7 +154,7 @@ public final class WorldLifecycleMethods {
         Minecraft mc = ClientThread.mc();
         mc.execute(() -> {
             leaveIfInWorld(mc);
-            mc.createWorldOpenFlows().openWorld(levelId, () -> mc.gui.setScreen(new TitleScreen()));
+            mc.createWorldOpenFlows().openWorld(levelId, () -> mc.setScreen(new TitleScreen()));
         });
         JsonObject out = new JsonObject();
         out.addProperty("levelId", levelId);
@@ -207,7 +207,7 @@ public final class WorldLifecycleMethods {
         TickScheduler.add(() -> {
             Minecraft mc = ClientThread.mc();
             String state = StatusMethods.state(mc);
-            Screen screen = mc.gui.screen();
+            Screen screen = mc.screen;
             if (state.equals("in-world") && screen == null) {
                 out.addProperty("state", state);
                 out.addProperty("loadMs", System.currentTimeMillis() - start);

@@ -22,7 +22,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+import com.coolerpromc.mctest.mixin.MouseHandlerInvoker;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
@@ -131,14 +131,14 @@ public final class ActionMethods {
                 LocalPlayer p = WorldMethods.requirePlayer();
                 Entity target = entity(id);
                 p.lookAt(EntityAnchorArgument.Anchor.EYES, target.getBoundingBox().getCenter());
-                Screen before = mc.gui.screen();
+                Screen before = mc.screen;
                 EntityHitResult hit = new EntityHitResult(target, target.getBoundingBox().getCenter());
                 InteractionResult result = mc.gameMode.interact(p, target, hit, hand);
                 swingIfPredicted(p, hand, result);
                 JsonObject out = new JsonObject();
                 out.addProperty("result", result.getClass().getSimpleName());
-                out.add("screenAfter", StatusMethods.describeScreen(mc.gui.screen()));
-                out.addProperty("screenChanged", before != mc.gui.screen());
+                out.add("screenAfter", StatusMethods.describeScreen(mc.screen));
+                out.addProperty("screenChanged", before != mc.screen);
                 return out;
             });
         });
@@ -261,7 +261,7 @@ public final class ActionMethods {
         TickScheduler.add(() -> {
             // Opening a screen releases all keys in vanilla; keep re-asserting so a hold survives brief UI.
             if (--left[0] > 0) {
-                if (ClientThread.mc().gui.screen() == null) k.setDown(true);
+                if (ClientThread.mc().screen == null) k.setDown(true);
                 return false;
             }
             k.setDown(false);
@@ -279,7 +279,7 @@ public final class ActionMethods {
     private static JsonElement useOn(BlockPos pos, Direction face, InteractionHand hand) {
         Minecraft mc = ClientThread.mc();
         LocalPlayer p = WorldMethods.requirePlayer();
-        Screen before = mc.gui.screen();
+        Screen before = mc.screen;
         Vec3 hitVec = Vec3.atCenterOf(pos).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
         BlockHitResult hit = new BlockHitResult(hitVec, face, pos, false);
         p.lookAt(EntityAnchorArgument.Anchor.EYES, hitVec);
@@ -291,8 +291,8 @@ public final class ActionMethods {
         out.addProperty("result", result.getClass().getSimpleName());
         out.addProperty("consumesAction", result.consumesAction());
         out.addProperty("distance", Math.sqrt(p.getEyePosition().distanceToSqr(hitVec)));
-        out.add("screenAfter", StatusMethods.describeScreen(mc.gui.screen()));
-        out.addProperty("screenChanged", before != mc.gui.screen());
+        out.add("screenAfter", StatusMethods.describeScreen(mc.screen));
+        out.addProperty("screenChanged", before != mc.screen);
         return out;
     }
 
@@ -382,14 +382,13 @@ public final class ActionMethods {
 
     /** What vanilla does after a left-click attack or dig tick. */
     static void attackSwing(LocalPlayer p) {
-        p.swing(InteractionHand.MAIN_HAND, p.getMainHandItem().getAttackAnimation(), false);
-        p.connection.send(ServerboundPunchPacket.INSTANCE);
+        p.swing(InteractionHand.MAIN_HAND);
     }
 
     /** What vanilla does after a right-click whose result the client predicted. */
     private static void swingIfPredicted(LocalPlayer p, InteractionHand hand, InteractionResult result) {
-        if (result instanceof InteractionResult.Success success && success.swingSource() == InteractionResult.SwingSource.PREDICTED) {
-            p.swing(hand, p.getItemInHand(hand).getInteractAnimation(), false);
+        if (result instanceof InteractionResult.Success success && success.swingSource() == InteractionResult.SwingSource.CLIENT) {
+            p.swing(hand);
         }
     }
 
@@ -399,11 +398,11 @@ public final class ActionMethods {
         Minecraft mc = ClientThread.mc();
         Window window = mc.getWindow();
         if (guiX != null && guiY != null) {
-            mc.mouseHandler.onMove(window.handle(), guiX * window.getScreenWidth() / window.getGuiScaledWidth(),
-                    guiY * window.getScreenHeight() / window.getGuiScaledHeight(), 0, 0);
+            ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), guiX * window.getScreenWidth() / window.getGuiScaledWidth(),
+                    guiY * window.getScreenHeight() / window.getGuiScaledHeight());
         }
         // Positive = scroll up (wheel away from you), as in vanilla.
-        mc.mouseHandler.onScroll(window.handle(), 0, amount);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onScroll(window.handle(), 0, amount);
         JsonObject out = new JsonObject();
         out.addProperty("scrolled", amount);
         if (mc.player != null) out.addProperty("selectedSlot", mc.player.getInventory().getSelectedSlot());
@@ -416,7 +415,7 @@ public final class ActionMethods {
         LocalPlayer p = WorldMethods.requirePlayer();
         ItemStack stack;
         String source;
-        if (mc.gui.screen() instanceof AbstractContainerScreen<?> screen) {
+        if (mc.screen instanceof AbstractContainerScreen<?> screen) {
             source = "menu:" + screen.getMenu().getClass().getSimpleName();
             AbstractContainerMenu menu = screen.getMenu();
             if (slot < 0 || slot >= menu.slots.size()) throw new RpcException("Slot " + slot + " out of range for the open menu");

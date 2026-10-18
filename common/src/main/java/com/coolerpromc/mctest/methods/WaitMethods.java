@@ -119,7 +119,7 @@ public final class WaitMethods {
     /** {@code screen:TitleScreen}, {@code screen:net.minecraft...InventoryScreen}, or {@code screen:none}. */
     private static Supplier<Check> screen(String wanted) {
         return () -> {
-            Screen screen = ClientThread.mc().gui.screen();
+            Screen screen = ClientThread.mc().screen;
             if (screen == null) {
                 return new Check(wanted.equalsIgnoreCase("none") || wanted.equalsIgnoreCase("null"), "none");
             }

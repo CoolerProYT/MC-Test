@@ -163,9 +163,9 @@ public final class Navigator {
             if (p == null || mc.level == null || !p.isAlive()) {
                 return finish(false, p != null && !p.isAlive() ? "player died" : "left the world");
             }
-            if (mc.gui.screen() != null) {
+            if (mc.screen != null) {
                 // Vanilla releases movement keys while a screen is open; wait for it to close.
-                if (++screenTicks > 100) return finish(false, "a screen stayed open: " + mc.gui.screen().getClass().getSimpleName());
+                if (++screenTicks > 100) return finish(false, "a screen stayed open: " + mc.screen.getClass().getSimpleName());
                 return false;
             }
             screenTicks = 0;

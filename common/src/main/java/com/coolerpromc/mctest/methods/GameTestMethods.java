@@ -1,5 +1,6 @@
 package com.coolerpromc.mctest.methods;
 
+import com.coolerpromc.mctest.mixin.GameTestInfoAccessor;
 import com.coolerpromc.mctest.Constants;
 import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
@@ -178,7 +179,7 @@ public final class GameTestMethods {
             r.addProperty("passed", passed);
             r.addProperty("required", info.isRequired());
             r.addProperty("ms", info.getRunTime());
-            r.addProperty("ticks", info.getTick());
+            r.addProperty("ticks", ((GameTestInfoAccessor) info).mctest$getTick());
             BlockPos testPos = info.getTestBlockPos();
             r.add("testPos", testPos == null ? null : Describe.pos(testPos));
             Throwable error = info.getError();

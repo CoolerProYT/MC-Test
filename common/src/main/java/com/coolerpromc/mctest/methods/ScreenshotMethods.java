@@ -57,7 +57,7 @@ public final class ScreenshotMethods {
 
         CompletableFuture<JsonElement> future = new CompletableFuture<>();
         // Copies the framebuffer into a GPU buffer; the callback fires once the readback finishes (a frame or so later).
-        Screenshot.takeScreenshot(mc.gameRenderer.mainRenderTarget(), image -> Util.ioPool().execute(() -> {
+        Screenshot.takeScreenshot(mc.getMainRenderTarget(), image -> Util.ioPool().execute(() -> {
             try (NativeImage img = image) {
                 dir.mkdirs();
                 img.writeToFile(file);

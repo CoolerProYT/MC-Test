@@ -19,7 +19,10 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerInput;
-import org.lwjgl.sdl.SDLKeyboard;
+import com.coolerpromc.mctest.mixin.KeyboardHandlerInvoker;
+import com.coolerpromc.mctest.mixin.MouseHandlerInvoker;
+import net.minecraft.client.input.CharacterEvent;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.Locale;
 import java.util.Map;
@@ -27,7 +30,7 @@ import java.util.Map;
 /**
  * Screen inspection and synthetic input. Mouse and keyboard events are fed through vanilla's own
  * {@code MouseHandler}/{@code KeyboardHandler}, so screens, keybindings and mouse grabbing behave as with real input.
- * 26.x uses SDL3: key values are SDL scancodes and modifiers are SDL {@code KMOD_*} bits.
+ * Minecraft 26.2 uses GLFW: key values are GLFW key codes and modifiers are GLFW {@code MOD_*} bits.
  */
 public final class InputMethods {
 
@@ -86,13 +89,13 @@ public final class InputMethods {
             return ClientThread.call(() -> clickSlot(index, button, input));
         });
         RpcRegistry.register("key", params -> {
-            int scancode = scancode(params.get("key"));
+            int keyCode = keyCode(params.get("key"));
             int mods = modifiers(params);
             String action = Params.string(params, "action", "tap").toLowerCase(Locale.ROOT);
             if (!action.equals("tap") && !action.equals("press") && !action.equals("release")) {
                 throw new RpcException("action must be tap, press or release");
             }
-            return ClientThread.call(() -> InputGuard.synthetic(() -> key(scancode, mods, action)));
+            return ClientThread.call(() -> InputGuard.synthetic(() -> key(keyCode, mods, action)));
         });
         RpcRegistry.register("type", params -> {
             String text = Params.string(params, "text");
@@ -105,7 +108,7 @@ public final class InputMethods {
 
     private static JsonElement snapshot() {
         Minecraft mc = ClientThread.mc();
-        Screen screen = mc.gui.screen();
+        Screen screen = mc.screen;
         JsonObject out = new JsonObject();
         out.add("screen", StatusMethods.describeScreen(screen));
         Window window = mc.getWindow();
@@ -125,16 +128,16 @@ public final class InputMethods {
 
     private static JsonElement click(double guiX, double guiY, int sdlButton, int mods) {
         Minecraft mc = ClientThread.mc();
-        Screen before = mc.gui.screen();
+        Screen before = mc.screen;
         Window window = mc.getWindow();
         // MouseHandler stores window coordinates and scales them down to GUI coordinates itself.
         double rawX = guiX * window.getScreenWidth() / window.getGuiScaledWidth();
         double rawY = guiY * window.getScreenHeight() / window.getGuiScaledHeight();
-        mc.mouseHandler.onMove(window.handle(), rawX, rawY, 0, 0);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), rawX, rawY);
         MouseButtonInfo info = new MouseButtonInfo(sdlButton, mods);
-        mc.mouseHandler.onButton(window.handle(), info, InputConstants.PRESS);
-        mc.mouseHandler.onButton(window.handle(), info, InputConstants.RELEASE);
-        return screenChange(before, mc.gui.screen());
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onButton(window.handle(), info, InputConstants.PRESS);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onButton(window.handle(), info, InputConstants.RELEASE);
+        return screenChange(before, mc.screen);
     }
 
     /** Moves the mouse without clicking, e.g. so a screenshot shows a slot's tooltip. */
@@ -143,8 +146,8 @@ public final class InputMethods {
         double x, y;
         JsonObject out = new JsonObject();
         if (slot != null) {
-            if (!(mc.gui.screen() instanceof AbstractContainerScreen<?> screen)) {
-                throw new RpcException("No container screen open (current: " + describe(mc.gui.screen()) + ")");
+            if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
+                throw new RpcException("No container screen open (current: " + describe(mc.screen) + ")");
             }
             AbstractContainerMenu menu = screen.getMenu();
             if (slot < 0 || slot >= menu.slots.size()) {
@@ -160,8 +163,8 @@ public final class InputMethods {
             y = guiY;
         }
         Window window = mc.getWindow();
-        mc.mouseHandler.onMove(window.handle(), x * window.getScreenWidth() / window.getGuiScaledWidth(),
-                y * window.getScreenHeight() / window.getGuiScaledHeight(), 0, 0);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), x * window.getScreenWidth() / window.getGuiScaledWidth(),
+                y * window.getScreenHeight() / window.getGuiScaledHeight());
         out.addProperty("x", x);
         out.addProperty("y", y);
         return out;
@@ -196,8 +199,8 @@ public final class InputMethods {
 
     private static JsonElement clickSlot(int index, int button, ContainerInput input) {
         Minecraft mc = ClientThread.mc();
-        if (!(mc.gui.screen() instanceof AbstractContainerScreen<?> screen)) {
-            throw new RpcException("No container screen open (current: " + describe(mc.gui.screen()) + ")");
+        if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
+            throw new RpcException("No container screen open (current: " + describe(mc.screen) + ")");
         }
         AbstractContainerMenu menu = screen.getMenu();
         if (index != AbstractContainerMenu.SLOT_CLICKED_OUTSIDE && (index < 0 || index >= menu.slots.size())) {
@@ -225,26 +228,26 @@ public final class InputMethods {
 
     // ---- keyboard ----
 
-    private static JsonElement key(int scancode, int mods, String action) {
+    private static JsonElement key(int keyCode, int mods, String action) {
         Minecraft mc = ClientThread.mc();
-        Screen before = mc.gui.screen();
+        Screen before = mc.screen;
         long handle = mc.getWindow().handle();
-        int keycode = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) mods, false);
-        KeyEvent event = new KeyEvent(scancode, keycode, mods);
+        KeyEvent event = new KeyEvent(keyCode, GLFW.glfwGetKeyScancode(keyCode), mods);
+        KeyboardHandlerInvoker keyboard = (KeyboardHandlerInvoker) mc.keyboardHandler;
         // "press" keeps the key down (for hasShiftDown()-style polling) until a matching "release".
         HeldKeys.withModifiers(mods, () -> {
             if (!action.equals("release")) {
-                HeldKeys.press(scancode);
-                mc.keyboardHandler.keyPress(handle, InputConstants.PRESS, event);
+                HeldKeys.press(keyCode);
+                keyboard.mctest$keyPress(handle, InputConstants.PRESS, event);
             }
             if (!action.equals("press")) {
-                HeldKeys.release(scancode);
-                mc.keyboardHandler.keyPress(handle, InputConstants.RELEASE, event);
+                HeldKeys.release(keyCode);
+                keyboard.mctest$keyPress(handle, InputConstants.RELEASE, event);
             }
             return null;
         });
-        JsonObject out = screenChange(before, mc.gui.screen());
-        out.addProperty("key", InputConstants.Type.KEYBOARD.getOrCreate(scancode).getName());
+        JsonObject out = screenChange(before, mc.screen);
+        out.addProperty("key", InputConstants.Type.KEYSYM.getOrCreate(keyCode).getName());
         out.add("heldKeys", heldKeys());
         // What polling code (e.g. "hold shift for details" tooltips) sees now.
         JsonObject down = new JsonObject();
@@ -258,14 +261,15 @@ public final class InputMethods {
     /** Names of the keys MCTest is currently holding down. */
     public static JsonArray heldKeys() {
         JsonArray arr = new JsonArray();
-        HeldKeys.held().stream().sorted().forEach(k -> arr.add(InputConstants.Type.KEYBOARD.getOrCreate(k).getName()));
+        HeldKeys.held().stream().sorted().forEach(k -> arr.add(InputConstants.Type.KEYSYM.getOrCreate(k).getName()));
         return arr;
     }
 
     private static JsonElement type(String text) {
         Minecraft mc = ClientThread.mc();
         requireScreen();
-        mc.keyboardHandler.textInput(mc.getWindow().handle(), text);
+        long handle = mc.getWindow().handle();
+        text.codePoints().forEach(c -> ((KeyboardHandlerInvoker) mc.keyboardHandler).mctest$charTyped(handle, new CharacterEvent(c)));
         JsonObject out = new JsonObject();
         out.addProperty("typed", text.codePointCount(0, text.length()));
         return out;
@@ -273,16 +277,16 @@ public final class InputMethods {
 
     private static JsonElement closeScreen() {
         Minecraft mc = ClientThread.mc();
-        Screen before = mc.gui.screen();
+        Screen before = mc.screen;
         if (before != null) {
             before.onClose();
         }
-        return screenChange(before, mc.gui.screen());
+        return screenChange(before, mc.screen);
     }
 
     // ---- param parsing ----
 
-    /** Accepts names (left/right/middle) or web-style numbers (0 = left, 1 = right, 2 = middle); returns SDL buttons. */
+    /** Accepts names (left/right/middle) or web-style numbers (0 = left, 1 = right, 2 = middle); returns GLFW buttons. */
     private static int mouseButton(JsonObject params) {
         if (!Params.has(params, "button")) {
             return InputConstants.MOUSE_BUTTON_LEFT;
@@ -296,7 +300,7 @@ public final class InputMethods {
         };
     }
 
-    /** Accepts an array/comma list of shift/ctrl/alt/super, or a raw SDL modifier bitmask. */
+    /** Accepts an array/comma list of shift/ctrl/alt/super, or a raw GLFW modifier bitmask. */
     public static int modifiers(JsonObject params) {
         JsonElement m = params.get("modifiers");
         if (m == null || m.isJsonNull()) {
@@ -328,8 +332,8 @@ public final class InputMethods {
         return mods;
     }
 
-    /** Resolves a key name ("e", "escape", "left_shift", "key.keyboard.f3") or a raw SDL scancode number. */
-    private static int scancode(JsonElement key) {
+    /** Resolves a key name ("e", "escape", "left_shift", "key.keyboard.f3") or a raw GLFW key code. */
+    private static int keyCode(JsonElement key) {
         if (key == null || key.isJsonNull()) {
             throw new RpcException("Missing required param 'key'");
         }
@@ -348,14 +352,14 @@ public final class InputMethods {
         } catch (RuntimeException e) {
             k = InputConstants.UNKNOWN;
         }
-        if (k == InputConstants.UNKNOWN || k.getType() != InputConstants.Type.KEYBOARD) {
-            throw new RpcException("Unknown key '" + raw + "'. Use names like e, escape, enter, left_shift, f3, up, or an SDL scancode");
+        if (k == InputConstants.UNKNOWN || k.getType() != InputConstants.Type.KEYSYM) {
+            throw new RpcException("Unknown key '" + raw + "'. Use names like e, escape, enter, left_shift, f3, up, or a GLFW key code");
         }
         return k.getValue();
     }
 
     private static Screen requireScreen() {
-        Screen screen = ClientThread.mc().gui.screen();
+        Screen screen = ClientThread.mc().screen;
         if (screen == null) {
             throw new RpcException("No screen is open");
         }

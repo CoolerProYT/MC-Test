@@ -3,8 +3,12 @@ plugins {
     id 'maven-publish'
 }
 
+// The Minecraft version in the artifact name. A build can cover several patch releases (built against 26.1.2,
+// published as mctest-<loader>-26.1 for 26.1-26.1.2) by setting artifact_minecraft_version.
+ext.artifact_minecraft_version = project.findProperty('artifact_minecraft_version') ?: minecraft_version
+
 base {
-    archivesName = "${mod_id}-${project.name}-${minecraft_version}"
+    archivesName = "${mod_id}-${project.name}-${artifact_minecraft_version}"
 }
 
 java {
@@ -39,6 +43,7 @@ processResources {
             'version'                      : version,
             'group'                        : project.group, //Else we target the task's group.
             'minecraft_version'            : minecraft_version,
+            'artifact_minecraft_version'   : artifact_minecraft_version,
             'minecraft_version_range'      : minecraft_version_range,
             'fabric_version'               : fabric_version,
             'fabric_loader_version'        : fabric_loader_version,

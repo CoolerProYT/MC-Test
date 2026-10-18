@@ -738,7 +738,7 @@ public final class SkillMethods {
                 future.complete(out);
                 return true;
             }
-            if (mc.gui.screen() != null) return false;
+            if (mc.screen != null) return false;
 
             Vec3 aim = victim.getBoundingBox().getCenter();
             Vec3 eye = me.getEyePosition();
@@ -988,7 +988,7 @@ public final class SkillMethods {
                 p.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, hit);
                 var result = mc.gameMode.useItemOn(p, InteractionHand.MAIN_HAND, new BlockHitResult(hit, face, support, false));
                 if (!result.consumesAction()) continue;
-                p.swing(InteractionHand.MAIN_HAND, p.getMainHandItem().getInteractAnimation(), false);
+                p.swing(InteractionHand.MAIN_HAND);
                 CompletableFuture<JsonElement> out = new CompletableFuture<>();
                 waitTicks(2).thenRun(() -> {
                     JsonObject o = new JsonObject();
@@ -1041,8 +1041,8 @@ public final class SkillMethods {
             }
             return chain.thenApply(v -> {
                 LocalPlayer me = mc.player;
-                if (opened && !keepOpen && mc.gui.screen() != null) {
-                    mc.gui.screen().onClose();
+                if (opened && !keepOpen && mc.screen != null) {
+                    mc.screen.onClose();
                 }
                 JsonObject out = new JsonObject();
                 out.addProperty("item", item);
@@ -1069,15 +1069,15 @@ public final class SkillMethods {
 
     /** Opens the inventory (2x2) or walks to and opens a crafting table (3x3). Completes with "we opened it". */
     private static CompletableFuture<Boolean> ensureCraftingMenu(Minecraft mc, LocalPlayer p, boolean big) {
-        if (mc.gui.screen() instanceof AbstractContainerScreen<?> s && s.getMenu() instanceof AbstractCraftingMenu m
+        if (mc.screen instanceof AbstractContainerScreen<?> s && s.getMenu() instanceof AbstractCraftingMenu m
                 && m.getGridWidth() >= (big ? 3 : 2)) {
             return CompletableFuture.completedFuture(false);
         }
-        if (mc.gui.screen() != null) {
-            mc.gui.screen().onClose();
+        if (mc.screen != null) {
+            mc.screen.onClose();
         }
         if (!big) {
-            mc.gui.setScreen(new InventoryScreen(p));
+            mc.setScreen(new InventoryScreen(p));
             return CompletableFuture.completedFuture(true);
         }
         BlockPos table = findNearest(mc.level, p.blockPosition(), s -> s.is(Blocks.CRAFTING_TABLE), 24, Set.of());

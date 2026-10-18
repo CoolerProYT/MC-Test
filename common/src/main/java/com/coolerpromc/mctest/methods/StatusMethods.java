@@ -46,7 +46,7 @@ public final class StatusMethods {
 
     private static JsonElement status() {
         Minecraft mc = ClientThread.mc();
-        Screen screen = mc.gui.screen();
+        Screen screen = mc.screen;
         String state = state(mc);
 
         JsonObject out = new JsonObject();
@@ -54,7 +54,7 @@ public final class StatusMethods {
         // "ready" = the client will accept input; what mc_wait_ready polls for.
         out.addProperty("ready", !state.equals("loading") && !state.equals("joining"));
         out.add("screen", describeScreen(screen));
-        out.addProperty("overlay", mc.gui.overlay() == null ? null : mc.gui.overlay().getClass().getName());
+        out.addProperty("overlay", mc.getOverlay() == null ? null : mc.getOverlay().getClass().getName());
         out.addProperty("singleplayer", mc.isLocalServer());
         out.addProperty("windowFocused", mc.getWindow().isFocused());
         out.addProperty("mouseGrabbed", mc.mouseHandler.isMouseGrabbed());
@@ -70,8 +70,8 @@ public final class StatusMethods {
 
     /** One of loading, title, joining, in-world. */
     public static String state(Minecraft mc) {
-        Screen screen = mc.gui.screen();
-        if (!mc.isGameLoadFinished() || mc.gui.overlay() != null) {
+        Screen screen = mc.screen;
+        if (!mc.isGameLoadFinished() || mc.getOverlay() != null) {
             return "loading";
         }
         if (mc.level != null && mc.player != null) {
