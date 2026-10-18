@@ -1,6 +1,6 @@
 # MCTest
 
-A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 26.1 to 26.3) plus an **MCP server**, so Claude Code (or any
+A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 26.1.2, 26.2 and 26.3) plus an **MCP server**, so Claude Code (or any
 coding agent, or your own scripts) can drive a running Minecraft client the way Playwright drives a browser: open
 worlds, click GUIs, press keys, walk, mine, place, craft, fight, run commands, inspect blocks, entities and inventories,
 read logs and take screenshots. The main use is testing your own mods.
@@ -25,19 +25,22 @@ Claude Code ──stdio/MCP──▶ mcp/ (Node) ──WebSocket JSON-RPC──�
 ### Where to get it
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 26.1 to 26.3. The snippets
-below are for 26.3; the 26.1 build covers 26.1, 26.1.1 and 26.1.2, so for those write `mctest-fabric-26.1` /
-`mctest-neoforge-26.1` instead of `${minecraft_version}`.
+`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 26.1.2, 26.2 and 26.3.
 The snippets below use that repository. If you're changing MCTest itself, run `./gradlew publishToMavenLocal` and use
 `mavenLocal()` instead to pick up your local build.
 
-Latest releases (updated automatically from the Maven repository; use the one for your Minecraft version):
+Latest releases, updated automatically from the Maven repository. Pick the row for your Minecraft version:
 
 <!-- mctest-versions:start -->
 | Minecraft | Fabric | NeoForge |
 |---|---|---|
-| 26.3 | `26.3.0.3` | `26.3.0.3` |
+| 26.3 | `mctest-fabric-26.3:26.3.0.3` | `mctest-neoforge-26.3:26.3.0.3` |
+| 26.2 | `mctest-fabric-26.2:26.2.0.1` | `mctest-neoforge-26.2:26.2.0.1` |
+| 26.1.2 | `mctest-fabric-26.1.2:26.1.2.1` | `mctest-neoforge-26.1.2:26.1.2.1` |
 <!-- mctest-versions:end -->
+
+The snippets below are for 26.3. For another Minecraft version, replace the artifact and version with the
+ones from its row (for example `mctest-fabric-26.1.2:26.1.2.1`).
 
 ### Fabric (Loom), in your mod's `fabric/build.gradle`
 
@@ -48,7 +51,7 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.3.0.3") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.3") { transitive = false }
 }
 ```
 
@@ -71,7 +74,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.3.0.3") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.3") { transitive = false }
 }
 ```
 
@@ -306,7 +309,7 @@ of a hole with no exposed stone), which is where pathfinding that can place bloc
   mod's startup errors are visible on both loaders.
 - **Tutorial hints are skipped.** Toasts like "Look around" would otherwise cover screenshots. Use
   `-Dmctest.tutorial=true` to keep them.
-- **Input is SDL3 from 26.3.** Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 26.1/26.2.
+- **Input is SDL3 from 26.3.** Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 26.1.2/26.2.
   Use names, which work on every version.
 - **Your mouse is left alone.** Vanilla captures the OS cursor whenever a screen closes in-world and warps it to the
   window centre whenever one opens, so an agent opening and closing screens or entering worlds would keep trapping or

@@ -2,7 +2,7 @@
 //
 // - Finds every published mod artifact (mctest-<loader>-<minecraft version>) through the repository's
 //   Reposilite API, so new Minecraft versions and loaders (backports) show up without changing this script.
-// - Rewrites the version table between <!-- mctest-versions:start --> and <!-- mctest-versions:end -->.
+// - Rewrites the version table (artifact:version per Minecraft version and loader) between <!-- mctest-versions:start --> and <!-- mctest-versions:end -->.
 // - Rewrites the version in dependency snippets such as
 //   localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.3.0.2") to the latest release for
 //   this branch's minecraft_version (gradle.properties). Snippets with a literal Minecraft version use that one.
@@ -68,7 +68,8 @@ function table(versions) {
   const lines = [
     `| Minecraft | ${loaders.map((l) => LOADER_NAMES[l]).join(' | ')} |`,
     `|---|${loaders.map(() => '---').join('|')}|`,
-    ...mcs.map((mc) => `| ${mc} | ${loaders.map((l) => (versions[mc][l] ? '`' + versions[mc][l] + '`' : '-')).join(' | ')} |`),
+    // Each cell is the exact artifact:version to depend on (group com.coolerpromc.mctest).
+    ...mcs.map((mc) => `| ${mc} | ${loaders.map((l) => (versions[mc][l] ? `\`mctest-${l}-${mc}:${versions[mc][l]}\`` : '-')).join(' | ')} |`),
   ];
   return lines.join('\n');
 }
