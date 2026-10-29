@@ -30,7 +30,18 @@ screen class). `screen:` in `mc_wait_for` also matches superclasses, for example
 
 ## Input is SDL3 from 26.3
 
-Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 1.21.1, 26.1.2 and 26.2. Use names (`e`, `escape`, `left_shift`, `f3`).
+Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 1.20.1, 1.21.1, 26.1.2 and 26.2. Use names (`e`, `escape`, `left_shift`, `f3`).
+
+## Freezing time on 1.20.1
+
+Vanilla only has `/tick` from 1.20.3, so on 1.20.1 `mc_time_freeze`, `mc_time_step` and `mc_lockstep` use MCTest's
+own freeze. It behaves the same: chunks keep loading and players keep moving; time, weather, block ticks, block
+entities and other entities stop.
+
+## Item details use NBT on 1.20.1
+
+On 1.20.1 the `components` of an item stack list its NBT tags (`Damage`, `Enchantments`, `display`), since data
+components only exist from 1.20.5.
 
 ## Pause on lost focus is off
 

@@ -14,7 +14,7 @@ Claude Code ──stdio/MCP──▶ mctest-mcp (Node) ──WebSocket JSON-RPC�
 ## 1. Add the mod to your mod's dev runtime
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 1.21.1, 26.1.2, 26.2 and 26.3.
+`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 1.20.1, 1.21.1, 26.1.2, 26.2 and 26.3. 1.20.1 is for Fabric and Forge.
 
 Latest releases, updated automatically from the Maven repository. Pick the row for your Minecraft version:
 
@@ -30,7 +30,8 @@ The snippets below are for 26.3. For another Minecraft version, replace the arti
 ones from its row (for example `mctest-fabric-26.1.2:26.1.2.1`).
 
 On **1.21.1** Fabric, depend on it with `modLocalRuntime` instead of `localRuntime`: 1.21.1 is obfuscated, so
-Loom has to remap MCTest to your mappings. NeoForge uses `localRuntime` on every version.
+Loom has to remap MCTest to your mappings. NeoForge uses `localRuntime` on every version. For 1.20.1 on Forge, see
+[below](#minecraft-1-20-1-on-forge).
 
 ::: code-group
 
@@ -62,6 +63,44 @@ dependencies {
 ```
 
 :::
+
+### Minecraft 1.20.1 on Forge
+
+1.20.1 is published for **Fabric and Forge** (no NeoForge), as `mctest-fabric-1.20.1` and `mctest-forge-1.20.1`. On
+Fabric use `modLocalRuntime` as for 1.21.1. Forge 1.20.1 jars are SRG-obfuscated, so MCTest is deobfuscated for your
+dev runs. With **ForgeGradle 6** (the 1.20.1 MDK):
+
+```groovy
+repositories {
+    maven { url = 'https://maven.coolerpromc.com/releases/' }
+}
+
+dependencies {
+    // Dev-only: deobfuscated for runClient/runServer, never in your jar or POM.
+    runtimeOnly(fg.deobf("com.coolerpromc.mctest:mctest-forge-1.20.1:1.20.1.1")) { transitive = false }
+}
+
+minecraft {
+    runs {
+        configureEach {
+            // Needed for mixins from obfuscated mod jars (MCTest's). The 1.20.1 MDK leaves these out; without them
+            // the game stops at startup with "Mixin apply failed".
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+        }
+    }
+}
+```
+
+With **ModDevGradle** (`net.neoforged.moddev.legacyforge`), which sets up the mixin remapping itself:
+
+```groovy
+dependencies {
+    modRuntimeOnly("com.coolerpromc.mctest:mctest-forge-1.20.1:1.20.1.1") { transitive = false }
+}
+```
+
+Use the version from the 1.20.1 row of the table above once it is published.
 
 `transitive = false` stops MCTest's own Fabric API / loader runtime dependencies from overriding your versions. Both
 setups were verified with a MultiLoader-template mod: MCTest loads in `runClient` on both loaders and does not appear

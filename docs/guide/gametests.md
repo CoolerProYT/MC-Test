@@ -14,10 +14,12 @@ mc_world_create {name:"gt", flat:true}
 ```
 
 - Register tests through the Fabric or NeoForge GameTest API, or as `test_instance` JSON in a datapack.
-- **On 1.21.1** tests are registered in code only (`@GameTest` methods, no `test_instance` JSON). Selectors match the
+- **On 1.20.1 and 1.21.1** tests are registered in code only (`@GameTest` methods, no `test_instance` JSON). Selectors match the
   test name (`myclass.mytest`), the structure id, or `<structure namespace>:<test name>`, so `mymod:*` runs the
   tests whose structures live in `mymod`. On NeoForge, enable your namespace with `neoforge.enabledGameTestNamespaces`.
-  MCTest ticks the tests it starts itself, since vanilla 1.21.1 only does that in its IDE mode.
+  MCTest ticks the tests it starts itself, since vanilla only does that in its IDE mode there. On 1.20.1 Forge,
+  Forge only registers your tests with the run properties `forge.enableGameTest=true` and
+  `forge.enabledGameTestNamespaces=<your mod id>`.
 - Use a **flat** test world: tests are placed near the world spawn.
 - A world whose datapacks add registry content shows the "experimental settings / backup" prompt on load.
   `mc_world_join` answers it for you unless you pass `confirmPrompts: false`.
