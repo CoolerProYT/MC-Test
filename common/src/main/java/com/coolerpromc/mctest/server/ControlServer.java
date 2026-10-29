@@ -5,20 +5,15 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.MultiThreadIoEventLoopGroup;
-import io.netty.channel.nio.NioIoHandler;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolConfig;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.net.InetSocketAddress;
 
 /**
- * Loopback-only WebSocket server. Uses the Netty that Minecraft already ships, on daemon threads so it can never keep
+ * Loopback-only WebSocket server. Uses the Netty that Minecraft already ships (with MCTest's own WebSocket codec on 1.21.1), on daemon threads so it can never keep
  * the JVM alive after the game exits.
  */
 public final class ControlServer {
@@ -46,12 +41,7 @@ public final class ControlServer {
         if (channel != null) {
             return;
         }
-        group = new MultiThreadIoEventLoopGroup(1, new DefaultThreadFactory("mctest-ws", true), NioIoHandler.newFactory());
-        WebSocketServerProtocolConfig wsConfig = WebSocketServerProtocolConfig.newBuilder()
-                .websocketPath("/")
-                .checkStartsWith(true)
-                .maxFramePayloadLength(16 * 1024 * 1024)
-                .build();
+        group = new NioEventLoopGroup(1, new DefaultThreadFactory("mctest-ws", true));
         try {
             channel = new ServerBootstrap()
                     .group(group)
@@ -60,9 +50,7 @@ public final class ControlServer {
                         @Override
                         protected void initChannel(SocketChannel ch) {
                             ch.pipeline()
-                                    .addLast(new HttpServerCodec())
-                                    .addLast(new HttpObjectAggregator(64 * 1024))
-                                    .addLast(new WebSocketServerProtocolHandler(wsConfig))
+                                    .addLast(new WebSocketCodec())
                                     .addLast(new RpcFrameHandler());
                         }
                     })

@@ -9,6 +9,7 @@ import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.component.TypedDataComponent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -101,12 +102,12 @@ public final class Describe {
         JsonObject out = new JsonObject();
         out.add("pos", pos(pos));
         out.addProperty("source", source);
-        out.addProperty("dimension", level.dimension().identifier().toString());
+        out.addProperty("dimension", level.dimension().location().toString());
         out.addProperty("loaded", level.isLoaded(pos));
         BlockState state = level.getBlockState(pos);
         out.addProperty("id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
         JsonObject properties = new JsonObject();
-        state.getValues().forEach(v -> properties.addProperty(v.property().getName(), v.valueName()));
+        state.getValues().forEach((property, value) -> properties.addProperty(property.getName(), valueName(property, value)));
         out.add("properties", properties);
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null) {
@@ -142,5 +143,24 @@ public final class Describe {
             o.add("item", stack(item.getItem()));
         }
         return o;
+    }
+
+    /** Inventory section of a player inventory slot: 0-8 hotbar, 9-35 main, 36-39 armor (feet to head), 40 offhand. */
+    public static String inventorySection(int i) {
+        if (i < Inventory.getSelectionSize()) return "hotbar";
+        if (i < Inventory.INVENTORY_SIZE) return "main";
+        return switch (i) {
+            case 36 -> "feet";
+            case 37 -> "legs";
+            case 38 -> "chest";
+            case 39 -> "head";
+            case Inventory.SLOT_OFFHAND -> "offhand";
+            default -> "other";
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Comparable<T>> String valueName(net.minecraft.world.level.block.state.properties.Property<T> property, Comparable<?> value) {
+        return property.getName((T) value);
     }
 }

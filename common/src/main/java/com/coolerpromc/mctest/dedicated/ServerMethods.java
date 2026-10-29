@@ -19,7 +19,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
@@ -122,7 +122,7 @@ public final class ServerMethods {
         out.addProperty("side", "server");
         out.addProperty("state", state);
         out.addProperty("ready", state.equals("running"));
-        out.addProperty("minecraftVersion", SharedConstants.getCurrentVersion().name());
+        out.addProperty("minecraftVersion", SharedConstants.getCurrentVersion().getName());
         out.addProperty("loader", Services.PLATFORM.getPlatformName());
         out.addProperty("loaderVersion", Services.PLATFORM.getLoaderVersion());
         out.addProperty("gameDir", Services.PLATFORM.getGameDir().toAbsolutePath().normalize().toString());
@@ -137,10 +137,10 @@ public final class ServerMethods {
             out.addProperty("frozen", server.tickRateManager().isFrozen());
             out.addProperty("maxPlayers", server.getPlayerList().getMaxPlayers());
             JsonArray players = new JsonArray();
-            server.getPlayerList().getPlayers().forEach(p -> players.add(p.getGameProfile().name()));
+            server.getPlayerList().getPlayers().forEach(p -> players.add(p.getGameProfile().getName()));
             out.add("players", players);
             JsonArray levels = new JsonArray();
-            server.levelKeys().forEach(k -> levels.add(k.identifier().toString()));
+            server.levelKeys().forEach(k -> levels.add(k.location().toString()));
             out.add("dimensions", levels);
         }
         out.add("mods", Describe.mods());
@@ -228,16 +228,16 @@ public final class ServerMethods {
 
     private static JsonObject player(MinecraftServer server, ServerPlayer p) {
         JsonObject out = new JsonObject();
-        out.addProperty("name", p.getGameProfile().name());
+        out.addProperty("name", p.getGameProfile().getName());
         out.addProperty("uuid", p.getUUID().toString());
         out.addProperty("entityId", p.getId());
-        out.addProperty("op", server.getPlayerList().isOp(p.nameAndId()));
+        out.addProperty("op", server.getPlayerList().isOp(p.getGameProfile()));
         out.addProperty("ping", p.connection == null ? null : p.connection.latency());
         out.add("pos", Describe.vec(p.position()));
         out.add("blockPos", Describe.pos(p.blockPosition()));
         out.addProperty("yaw", p.getYRot());
         out.addProperty("pitch", p.getXRot());
-        out.addProperty("dimension", p.level().dimension().identifier().toString());
+        out.addProperty("dimension", p.level().dimension().location().toString());
         out.addProperty("gamemode", p.gameMode.getGameModeForPlayer().getName());
         out.addProperty("health", p.getHealth());
         out.addProperty("maxHealth", p.getMaxHealth());
@@ -247,15 +247,14 @@ public final class ServerMethods {
         out.addProperty("onGround", p.onGround());
 
         Inventory inv = p.getInventory();
-        out.addProperty("selectedSlot", inv.getSelectedSlot());
+        out.addProperty("selectedSlot", inv.selected);
         JsonArray items = new JsonArray();
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack stack = inv.getItem(i);
             if (stack.isEmpty()) continue;
             JsonObject s = Describe.stack(stack);
             s.addProperty("slot", i);
-            EquipmentSlot equipment = Inventory.EQUIPMENT_SLOT_MAPPING.get(i);
-            s.addProperty("section", i < Inventory.getSelectionSize() ? "hotbar" : i < Inventory.INVENTORY_SIZE ? "main" : equipment != null ? equipment.getName() : "other");
+            s.addProperty("section", Describe.inventorySection(i));
             items.add(s);
         }
         out.add("inventory", items);
@@ -282,7 +281,7 @@ public final class ServerMethods {
         Entity exclude = null;
         if (playerName != null) {
             ServerPlayer p = requirePlayer(server, playerName);
-            level = p.level();
+            level = p.serverLevel();
             origin = p.position();
             exclude = p;
         } else {
@@ -305,7 +304,7 @@ public final class ServerMethods {
             list.add(Describe.entity(e, origin));
         }
         JsonObject out = new JsonObject();
-        out.addProperty("dimension", level.dimension().identifier().toString());
+        out.addProperty("dimension", level.dimension().location().toString());
         out.addProperty("total", found.size());
         out.add("entities", list);
         return out;
@@ -375,11 +374,11 @@ public final class ServerMethods {
                 };
             }
             case "player" -> () -> {
-                boolean online = ServerThread.server().getPlayerList().getPlayer(arg) != null;
+                boolean online = ServerThread.server().getPlayerList().getPlayerByName(arg) != null;
                 return new Check(online, online ? arg + " online" : onlineNames());
             };
             case "noplayer" -> () -> {
-                boolean online = ServerThread.server().getPlayerList().getPlayer(arg) != null;
+                boolean online = ServerThread.server().getPlayerList().getPlayerByName(arg) != null;
                 return new Check(!online, online ? arg + " online" : onlineNames());
             };
             case "players" -> {
@@ -440,7 +439,7 @@ public final class ServerMethods {
     }
 
     private static String onlineNames() {
-        List<String> names = ServerThread.server().getPlayerList().getPlayers().stream().map(p -> p.getGameProfile().name()).toList();
+        List<String> names = ServerThread.server().getPlayerList().getPlayers().stream().map(p -> p.getGameProfile().getName()).toList();
         return "online: " + names;
     }
 
@@ -488,17 +487,17 @@ public final class ServerMethods {
         if (dimension == null || dimension.isBlank()) {
             return server.overworld();
         }
-        Identifier id = Identifier.tryParse(normalizeId(dimension));
+        ResourceLocation id = ResourceLocation.tryParse(normalizeId(dimension));
         ServerLevel level = id == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, id));
         if (level == null) {
             throw new RpcException("Unknown dimension '" + dimension + "'. Known: "
-                    + server.levelKeys().stream().map(k -> k.identifier().toString()).toList());
+                    + server.levelKeys().stream().map(k -> k.location().toString()).toList());
         }
         return level;
     }
 
     private static ServerPlayer requirePlayer(MinecraftServer server, String name) {
-        ServerPlayer p = server.getPlayerList().getPlayer(name);
+        ServerPlayer p = server.getPlayerList().getPlayerByName(name);
         if (p == null) {
             throw new RpcException("Player '" + name + "' is not online (" + onlineNames() + ")");
         }

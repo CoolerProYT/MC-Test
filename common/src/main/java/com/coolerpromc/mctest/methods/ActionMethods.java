@@ -70,7 +70,7 @@ public final class ActionMethods {
             if (slot < 0 || slot > 8) throw new RpcException("slot must be 0-8 (hotbar)");
             return ClientThread.call(() -> {
                 LocalPlayer p = WorldMethods.requirePlayer();
-                p.getInventory().setSelectedSlot(slot);
+                p.getInventory().selected = slot;
                 JsonObject out = new JsonObject();
                 out.addProperty("selectedSlot", slot);
                 out.add("item", ScreenInspector.stack(p.getInventory().getItem(slot)));
@@ -133,10 +133,14 @@ public final class ActionMethods {
                 p.lookAt(EntityAnchorArgument.Anchor.EYES, target.getBoundingBox().getCenter());
                 Screen before = mc.screen;
                 EntityHitResult hit = new EntityHitResult(target, target.getBoundingBox().getCenter());
-                InteractionResult result = mc.gameMode.interact(p, target, hit, hand);
+                // Same as vanilla's right-click on an entity: the precise hit first, then the generic interaction.
+                InteractionResult result = mc.gameMode.interactAt(p, target, hit, hand);
+                if (!result.consumesAction()) {
+                    result = mc.gameMode.interact(p, target, hand);
+                }
                 swingIfPredicted(p, hand, result);
                 JsonObject out = new JsonObject();
-                out.addProperty("result", result.getClass().getSimpleName());
+                out.addProperty("result", result.name());
                 out.add("screenAfter", StatusMethods.describeScreen(mc.screen));
                 out.addProperty("screenChanged", before != mc.screen);
                 return out;
@@ -185,7 +189,7 @@ public final class ActionMethods {
                     JsonObject o = new JsonObject();
                     o.addProperty("name", k.getName());
                     o.addProperty("label", Component.translatable(k.getName()).getString());
-                    o.addProperty("category", k.getCategory().id().toString());
+                    o.addProperty("category", k.getCategory());
                     o.addProperty("key", k.saveString());
                     o.addProperty("down", k.isDown());
                     list.add(o);
@@ -195,11 +199,18 @@ public final class ActionMethods {
         return out;
     }
 
+    private static KeyMapping byName(Minecraft mc, String name) {
+        for (KeyMapping k : mc.options.keyMappings) {
+            if (k.getName().equals(name)) return k;
+        }
+        return null;
+    }
+
     private static KeyMapping mapping(String name) {
         Minecraft mc = ClientThread.mc();
         String n = name.trim();
-        KeyMapping k = KeyMapping.get(n);
-        if (k == null) k = KeyMapping.get("key." + n);
+        KeyMapping k = byName(mc, n);
+        if (k == null) k = byName(mc, "key." + n);
         if (k == null) {
             // Friendly aliases for the vanilla names that differ from what players call them.
             k = switch (n.toLowerCase(Locale.ROOT)) {
@@ -288,7 +299,7 @@ public final class ActionMethods {
         swingIfPredicted(p, hand, result);
         JsonObject out = new JsonObject();
         out.addProperty("block", blockBefore);
-        out.addProperty("result", result.getClass().getSimpleName());
+        out.addProperty("result", result.name());
         out.addProperty("consumesAction", result.consumesAction());
         out.addProperty("distance", Math.sqrt(p.getEyePosition().distanceToSqr(hitVec)));
         out.add("screenAfter", StatusMethods.describeScreen(mc.screen));
@@ -304,7 +315,7 @@ public final class ActionMethods {
         swingIfPredicted(p, hand, result);
         JsonObject out = new JsonObject();
         out.add("item", ScreenInspector.stack(item));
-        out.addProperty("result", result.getClass().getSimpleName());
+        out.addProperty("result", result.name());
         if (ticks <= 0 || !p.isUsingItem()) {
             out.addProperty("usingItem", p.isUsingItem());
             return CompletableFuture.completedFuture(out);
@@ -387,7 +398,7 @@ public final class ActionMethods {
 
     /** What vanilla does after a right-click whose result the client predicted. */
     private static void swingIfPredicted(LocalPlayer p, InteractionHand hand, InteractionResult result) {
-        if (result instanceof InteractionResult.Success success && success.swingSource() == InteractionResult.SwingSource.CLIENT) {
+        if (result.shouldSwing()) {
             p.swing(hand);
         }
     }
@@ -398,14 +409,14 @@ public final class ActionMethods {
         Minecraft mc = ClientThread.mc();
         Window window = mc.getWindow();
         if (guiX != null && guiY != null) {
-            ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), guiX * window.getScreenWidth() / window.getGuiScaledWidth(),
+            ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.getWindow(), guiX * window.getScreenWidth() / window.getGuiScaledWidth(),
                     guiY * window.getScreenHeight() / window.getGuiScaledHeight());
         }
         // Positive = scroll up (wheel away from you), as in vanilla.
-        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onScroll(window.handle(), 0, amount);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onScroll(window.getWindow(), 0, amount);
         JsonObject out = new JsonObject();
         out.addProperty("scrolled", amount);
-        if (mc.player != null) out.addProperty("selectedSlot", mc.player.getInventory().getSelectedSlot());
+        if (mc.player != null) out.addProperty("selectedSlot", mc.player.getInventory().selected);
         return out;
     }
 

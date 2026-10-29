@@ -11,7 +11,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -56,8 +56,9 @@ public final class ScreenshotMethods {
         File file = new File(dir, fileName(requestedName));
 
         CompletableFuture<JsonElement> future = new CompletableFuture<>();
-        // Copies the framebuffer into a GPU buffer; the callback fires once the readback finishes (a frame or so later).
-        Screenshot.takeScreenshot(mc.getMainRenderTarget(), image -> Util.ioPool().execute(() -> {
+        // 1.21.1 reads the framebuffer back synchronously; encoding and writing happen off the render thread.
+        NativeImage image = Screenshot.takeScreenshot(mc.getMainRenderTarget());
+        Util.ioPool().execute(() -> {
             try (NativeImage img = image) {
                 dir.mkdirs();
                 img.writeToFile(file);
@@ -72,7 +73,7 @@ public final class ScreenshotMethods {
             } catch (Throwable t) {
                 future.completeExceptionally(t);
             }
-        }));
+        });
         return future;
     }
 
@@ -81,7 +82,12 @@ public final class ScreenshotMethods {
         int w = img.getWidth();
         int h = img.getHeight();
         BufferedImage full = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        full.setRGB(0, 0, w, h, img.getPixels(), 0, w);
+        int[] pixels = img.getPixelsRGBA();
+        for (int i = 0; i < pixels.length; i++) {
+            int c = pixels[i]; // RGBA bytes, read as a little-endian int: 0xAABBGGRR
+            pixels[i] = (c & 0xFF00) | ((c & 0xFF) << 16) | ((c >> 16) & 0xFF);
+        }
+        full.setRGB(0, 0, w, h, pixels, 0, w);
 
         double scale = Math.min(1.0, (double) maxSize / Math.max(w, h));
         int sw = Math.max(1, (int) Math.round(w * scale));

@@ -48,6 +48,9 @@ const SUITE_CMD = {
   mcp: ['npm', ['test'], 'mcp'],
 };
 
+// The client's control port. MCTEST_PORT moves it, e.g. when another MCTest client is running; pass the same port to
+// the game: JAVA_TOOL_OPTIONS=-Dmctest.port=<port>.
+const CLIENT_PORT = Number(process.env.MCTEST_PORT ?? 25599);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logDir = join(root, 'build', 'test-logs');
 mkdirSync(logDir, { recursive: true });
@@ -136,7 +139,7 @@ for (const loader of loaders.length ? loaders : ['fabric', 'neoforge']) {
       const s = await waitReady(25598, `${loader} server`, server);
       console.log(`server ready (${s.loader} ${s.minecraftVersion})`);
     }
-    const s = await waitReady(25599, `${loader} client`, client);
+    const s = await waitReady(CLIENT_PORT, `${loader} client`, client);
     console.log(`client ready (${s.loader} ${s.loaderVersion}, ${s.mods.length} mods)`);
     for (const suite of suites) {
       if (suite === 'server' && !server) continue;
@@ -151,7 +154,7 @@ for (const loader of loaders.length ? loaders : ['fabric', 'neoforge']) {
     console.log(`  ERROR ${e.message}`);
     results.push({ loader, name: 'startup', ok: false, failures: [e.message] });
   } finally {
-    await shutdown(client, 25599, 'quit');
+    await shutdown(client, CLIENT_PORT, 'quit');
     if (server) await shutdown(server, 25598, 'stop');
   }
 }

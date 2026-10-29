@@ -1,7 +1,5 @@
 // End-to-end check of the MCP server over stdio, using the SDK's own client.
 //   npm run build && node test-client.mjs      (with a Minecraft client running MCTest)
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -88,25 +86,11 @@ await check('mc_wait_for chat:', async () => {
   return ` -> ${json.observed}`;
 });
 
-await check('mc_gametest_run (vanilla always_pass)', async () => {
-  const { r, json } = await call('mc_gametest_run', { tests: 'minecraft:always_pass' });
+// 1.21.1 GameTests are registered in code: MCTest's dev runs (-Dmctest.selftest=true) register
+// mctest_selftest:passes and mctest_selftest:fails.
+await check('mc_gametest_run (one passing test)', async () => {
+  const { r, json } = await call('mc_gametest_run', { tests: 'mctest_selftest:passes' });
   assert(!r.isError && json.success && json.passed === 1, JSON.stringify(r.content));
-});
-
-// A datapack with one passing and one failing test; datapack registry content makes the world "experimental", so
-// rejoining it also exercises the automatic prompt confirmation.
-await check('mc_world_join confirms the experimental-settings prompt', async () => {
-  const gameDir = (await call('mc_status')).json.gameDir;
-  const dir = join(gameDir, 'saves', levelId, 'datapacks', 'mctest-selftest');
-  mkdirSync(join(dir, 'data', 'mctest_selftest', 'test_instance'), { recursive: true });
-  writeFileSync(join(dir, 'pack.mcmeta'), JSON.stringify({ pack: { description: 'MCTest self-test', min_format: 90, max_format: 1000 } }));
-  const t = (o) => JSON.stringify({ environment: 'minecraft:default', structure: 'minecraft:empty', max_ticks: 20, ...o });
-  writeFileSync(join(dir, 'data', 'mctest_selftest', 'test_instance', 'passes.json'), t({ type: 'minecraft:function', function: 'minecraft:always_pass' }));
-  writeFileSync(join(dir, 'data', 'mctest_selftest', 'test_instance', 'fails.json'), t({ type: 'minecraft:block_based' }));
-  await call('mc_world_leave');
-  const { r, json } = await call('mc_world_join', { name: levelId });
-  assert(!r.isError && json.confirmedPrompts?.length, JSON.stringify(r.content));
-  return ` -> ${json.confirmedPrompts[0]}`;
 });
 
 await check('mc_gametest_run reports a failure + the ERROR is appended', async () => {

@@ -2,9 +2,11 @@
   "required": true,
   "minVersion": "0.8",
   "package": "com.coolerpromc.mctest.mixin",
-  "compatibilityLevel": "JAVA_25",
+  "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "GameTestInfoAccessor"
+    "GameTestInfoAccessor",
+    "GameTestTickerMixin",
+    "MinecraftServerTickMixin"
   ],
   "client": [
     "AbstractContainerScreenAccessor",

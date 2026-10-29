@@ -11,6 +11,28 @@ base {
     archivesName = "${mod_id}-${project.name}-${artifact_minecraft_version}"
 }
 
+repositories {
+    mavenCentral()
+    exclusiveContent {
+        forRepositories(
+                maven {
+                    name = 'ParchmentMC'
+                    url = 'https://maven.parchmentmc.org/'
+                },
+                maven {
+                    name = 'NeoForge'
+                    url = 'https://maven.neoforged.net/releases'
+                }
+        )
+        filter { includeGroup('org.parchmentmc.data') }
+    }
+}
+
+dependencies {
+    // 26.x has JSpecify on the game classpath; on 1.21.1 it is only needed to compile the annotations.
+    compileOnly('org.jspecify:jspecify:1.0.0')
+}
+
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(java_version)
     withSourcesJar()

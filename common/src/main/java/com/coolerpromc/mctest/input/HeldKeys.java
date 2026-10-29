@@ -1,6 +1,6 @@
 package com.coolerpromc.mctest.input;
 
-import com.mojang.blaze3d.platform.InputConstants;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,10 +40,10 @@ public final class HeldKeys {
     public static <T> T withModifiers(int mods, Supplier<T> action) {
         int[] added = new int[4];
         int n = 0;
-        if ((mods & InputConstants.MOD_CONTROL) != 0 && HELD.add(LEFT_CTRL)) added[n++] = LEFT_CTRL;
-        if ((mods & InputConstants.MOD_SHIFT) != 0 && HELD.add(LEFT_SHIFT)) added[n++] = LEFT_SHIFT;
-        if ((mods & InputConstants.MOD_ALT) != 0 && HELD.add(LEFT_ALT)) added[n++] = LEFT_ALT;
-        if ((mods & InputConstants.MOD_SUPER) != 0 && HELD.add(LEFT_GUI)) added[n++] = LEFT_GUI;
+        if ((mods & GLFW.GLFW_MOD_CONTROL) != 0 && HELD.add(LEFT_CTRL)) added[n++] = LEFT_CTRL;
+        if ((mods & GLFW.GLFW_MOD_SHIFT) != 0 && HELD.add(LEFT_SHIFT)) added[n++] = LEFT_SHIFT;
+        if ((mods & GLFW.GLFW_MOD_ALT) != 0 && HELD.add(LEFT_ALT)) added[n++] = LEFT_ALT;
+        if ((mods & GLFW.GLFW_MOD_SUPER) != 0 && HELD.add(LEFT_GUI)) added[n++] = LEFT_GUI;
         try {
             return action.get();
         } finally {

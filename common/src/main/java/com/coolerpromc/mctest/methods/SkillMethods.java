@@ -19,28 +19,24 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
-import net.minecraft.util.context.ContextMap;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.StackedItemContents;
+import net.minecraft.world.entity.player.StackedContents;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.AbstractCraftingMenu;
-import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.RecipeBookMenu;
 import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.display.RecipeDisplay;
-import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
-import net.minecraft.world.item.crafting.display.ShapedCraftingRecipeDisplay;
-import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
-import net.minecraft.world.item.crafting.display.SlotDisplayContext;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -298,13 +294,13 @@ public final class SkillMethods {
         Inventory inv = p.getInventory();
         for (int i = 0; i < Inventory.getSelectionSize(); i++) {
             if (!inv.getItem(i).isEmpty() && match.test(inv.getItem(i))) {
-                inv.setSelectedSlot(i);
+                inv.selected = i;
                 return i;
             }
         }
         for (int i = Inventory.getSelectionSize(); i < Inventory.INVENTORY_SIZE; i++) {
             if (!inv.getItem(i).isEmpty() && match.test(inv.getItem(i))) {
-                int target = inv.getSelectedSlot();
+                int target = inv.selected;
                 for (int h = 0; h < Inventory.getSelectionSize(); h++) {
                     if (inv.getItem(h).isEmpty()) {
                         target = h;
@@ -312,7 +308,7 @@ public final class SkillMethods {
                     }
                 }
                 swapIntoHotbar(mc, p, i, target);
-                inv.setSelectedSlot(target);
+                inv.selected = target;
                 return target;
             }
         }
@@ -326,14 +322,14 @@ public final class SkillMethods {
             throw new RpcException("Close the open container first (" + p.containerMenu.getClass().getSimpleName() + ")");
         }
         // InventoryMenu indices 9-35 are the same main-inventory slots.
-        mc.gameMode.handleContainerInput(menu.containerId, inventorySlot, hotbarSlot, ContainerInput.SWAP, p);
+        mc.gameMode.handleInventoryMouseClick(menu.containerId, inventorySlot, hotbarSlot, ClickType.SWAP, p);
     }
 
     /** Best tool for a block: correct-for-drops first, then dig speed. Swaps one in from the main inventory if better. */
     static void selectBestTool(Minecraft mc, LocalPlayer p, BlockState state) {
         Inventory inv = p.getInventory();
         int best = -1;
-        double bestScore = score(inv.getItem(inv.getSelectedSlot()), state);
+        double bestScore = score(inv.getItem(inv.selected), state);
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             double s = score(inv.getItem(i), state);
             if (s > bestScore + 1e-6) {
@@ -343,9 +339,9 @@ public final class SkillMethods {
         }
         if (best < 0) return;
         if (best < Inventory.getSelectionSize()) {
-            inv.setSelectedSlot(best);
+            inv.selected = best;
         } else if (p.containerMenu == p.inventoryMenu) {
-            int target = inv.getSelectedSlot();
+            int target = inv.selected;
             swapIntoHotbar(mc, p, best, target);
         }
     }
@@ -369,7 +365,7 @@ public final class SkillMethods {
     static Predicate<BlockState> blockMatcher(String spec) {
         String s = normalizeId(spec);
         if (s.startsWith("#")) {
-            TagKey<Block> tag = TagKey.create(Registries.BLOCK, Identifier.parse(s.substring(1)));
+            TagKey<Block> tag = TagKey.create(Registries.BLOCK, ResourceLocation.parse(s.substring(1)));
             return state -> state.is(tag);
         }
         return state -> BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(s);
@@ -1012,23 +1008,23 @@ public final class SkillMethods {
     private static CompletableFuture<JsonElement> craft(String item, int times, boolean keepOpen) {
         Minecraft mc = ClientThread.mc();
         LocalPlayer p = WorldMethods.requirePlayer();
-        ContextMap ctx = SlotDisplayContext.fromLevel(mc.level);
-        List<RecipeDisplayEntry> recipes = p.getRecipeBook().getCollections().stream()
+        List<RecipeHolder<?>> recipes = p.getRecipeBook().getCollections().stream()
                 .flatMap(c -> c.getRecipes().stream())
-                .filter(e -> isCrafting(e.display()))
-                .filter(e -> e.resultItems(ctx).stream().anyMatch(s -> itemId(s).equals(item)))
+                .filter(e -> e.value() instanceof CraftingRecipe)
+                .filter(e -> itemId(e.value().getResultItem(mc.level.registryAccess())).equals(item))
+                .distinct()
                 .toList();
         if (recipes.isEmpty()) {
             throw new RpcException("No known crafting recipe for " + item + ". Recipes unlock when you first pick up an ingredient"
                     + " (or use /recipe give @s *).");
         }
-        StackedItemContents contents = new StackedItemContents();
+        StackedContents contents = new StackedContents();
         p.getInventory().fillStackedContents(contents);
-        RecipeDisplayEntry recipe = recipes.stream().filter(e -> e.canCraft(contents)).findFirst().orElse(null);
+        RecipeHolder<?> recipe = recipes.stream().filter(e -> contents.canCraft(e.value(), null)).findFirst().orElse(null);
         if (recipe == null) {
             throw new RpcException("Missing ingredients for " + item + " (" + recipes.size() + " recipe(s) known)");
         }
-        boolean big = needs3x3(recipe.display());
+        boolean big = !recipe.value().canCraftInDimensions(2, 2);
         Map<String, Integer> before = inventoryCounts(p);
 
         return ensureCraftingMenu(mc, p, big).thenCompose(opened -> {
@@ -1055,21 +1051,9 @@ public final class SkillMethods {
         });
     }
 
-    private static boolean isCrafting(RecipeDisplay d) {
-        return d instanceof ShapedCraftingRecipeDisplay || d instanceof ShapelessCraftingRecipeDisplay;
-    }
-
-    private static boolean needs3x3(RecipeDisplay d) {
-        return switch (d) {
-            case ShapedCraftingRecipeDisplay s -> s.width() > 2 || s.height() > 2;
-            case ShapelessCraftingRecipeDisplay s -> s.ingredients().size() > 4;
-            default -> true;
-        };
-    }
-
     /** Opens the inventory (2x2) or walks to and opens a crafting table (3x3). Completes with "we opened it". */
     private static CompletableFuture<Boolean> ensureCraftingMenu(Minecraft mc, LocalPlayer p, boolean big) {
-        if (mc.screen instanceof AbstractContainerScreen<?> s && s.getMenu() instanceof AbstractCraftingMenu m
+        if (mc.screen instanceof AbstractContainerScreen<?> s && s.getMenu() instanceof RecipeBookMenu<?, ?> m
                 && m.getGridWidth() >= (big ? 3 : 2)) {
             return CompletableFuture.completedFuture(false);
         }
@@ -1115,12 +1099,12 @@ public final class SkillMethods {
     }
 
     /** Click the recipe in the book (server fills the grid), then shift-click the result. */
-    private static CompletableFuture<Boolean> craftOnce(Minecraft mc, RecipeDisplayEntry recipe, String item) {
+    private static CompletableFuture<Boolean> craftOnce(Minecraft mc, RecipeHolder<?> recipe, String item) {
         LocalPlayer p = mc.player;
-        if (p == null || !(p.containerMenu instanceof AbstractCraftingMenu menu)) {
+        if (p == null || !(p.containerMenu instanceof RecipeBookMenu<?, ?> menu)) {
             return CompletableFuture.completedFuture(false);
         }
-        mc.gameMode.handlePlaceRecipe(menu.containerId, recipe.id(), false);
+        mc.gameMode.handlePlaceRecipe(menu.containerId, recipe, false);
         CompletableFuture<Boolean> done = new CompletableFuture<>();
         int[] waited = {0};
         TickScheduler.add(() -> {
@@ -1129,9 +1113,9 @@ public final class SkillMethods {
                 done.complete(false);
                 return true;
             }
-            ItemStack result = menu.getResultSlot().getItem();
+            ItemStack result = menu.getSlot(menu.getResultSlotIndex()).getItem();
             if (!result.isEmpty() && itemId(result).equals(item)) {
-                mc.gameMode.handleContainerInput(menu.containerId, menu.getResultSlot().index, 0, ContainerInput.QUICK_MOVE, me);
+                mc.gameMode.handleInventoryMouseClick(menu.containerId, menu.getResultSlotIndex(), 0, ClickType.QUICK_MOVE, me);
                 waitTicks(2).thenRun(() -> done.complete(true));
                 return true;
             }

@@ -145,7 +145,7 @@ public final class WorldMethods {
         out.addProperty("yaw", p.getYRot());
         out.addProperty("pitch", p.getXRot());
         out.add("velocity", vec(p.getDeltaMovement()));
-        out.addProperty("dimension", p.level().dimension().identifier().toString());
+        out.addProperty("dimension", p.level().dimension().location().toString());
         out.addProperty("gamemode", mc.gameMode == null ? null : mc.gameMode.getPlayerMode().getName());
         out.addProperty("health", p.getHealth());
         out.addProperty("maxHealth", p.getMaxHealth());
@@ -164,15 +164,14 @@ public final class WorldMethods {
         out.add("lookingAt", hitResult(mc.hitResult));
 
         Inventory inv = p.getInventory();
-        out.addProperty("selectedSlot", inv.getSelectedSlot());
+        out.addProperty("selectedSlot", inv.selected);
         JsonArray items = new JsonArray();
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack stack = inv.getItem(i);
             if (stack.isEmpty()) continue;
             JsonObject s = ScreenInspector.stack(stack);
             s.addProperty("slot", i);
-            EquipmentSlot equipment = Inventory.EQUIPMENT_SLOT_MAPPING.get(i);
-            s.addProperty("section", i < Inventory.getSelectionSize() ? "hotbar" : i < Inventory.INVENTORY_SIZE ? "main" : equipment != null ? equipment.getName() : "other");
+            s.addProperty("section", Describe.inventorySection(i));
             items.add(s);
         }
         out.add("inventory", items);
@@ -189,7 +188,7 @@ public final class WorldMethods {
 
         JsonArray attributes = new JsonArray();
         // Every registered attribute (vanilla and modded) the player actually has.
-        BuiltInRegistries.ATTRIBUTE.listElements()
+        BuiltInRegistries.ATTRIBUTE.holders()
                 .map(holder -> p.getAttributes().getInstance(holder))
                 .filter(java.util.Objects::nonNull)
                 .sorted(Comparator.comparing(a -> a.getAttribute().getRegisteredName()))
@@ -248,7 +247,7 @@ public final class WorldMethods {
             var dimension = player.level().dimension();
             return server.submit(() -> {
                 ServerLevel level = server.getLevel(dimension);
-                if (level == null) throw new RpcException("Server has no level " + dimension.identifier());
+                if (level == null) throw new RpcException("Server has no level " + dimension.location());
                 return Describe.block(level, pos, "server");
             });
         }

@@ -15,13 +15,10 @@ import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.ClickType;
 import com.coolerpromc.mctest.mixin.KeyboardHandlerInvoker;
 import com.coolerpromc.mctest.mixin.MouseHandlerInvoker;
-import net.minecraft.client.input.CharacterEvent;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.Locale;
@@ -30,7 +27,7 @@ import java.util.Map;
 /**
  * Screen inspection and synthetic input. Mouse and keyboard events are fed through vanilla's own
  * {@code MouseHandler}/{@code KeyboardHandler}, so screens, keybindings and mouse grabbing behave as with real input.
- * Minecraft 26.2 uses GLFW: key values are GLFW key codes and modifiers are GLFW {@code MOD_*} bits.
+ * Minecraft 1.21.1 uses GLFW: key values are GLFW key codes and modifiers are GLFW {@code MOD_*} bits.
  */
 public final class InputMethods {
 
@@ -85,7 +82,7 @@ public final class InputMethods {
         RpcRegistry.register("clickSlot", params -> {
             int index = Params.integer(params, "index");
             int button = Params.integer(params, "button", 0);
-            ContainerInput input = containerInput(Params.string(params, "clickType", "PICKUP"));
+            ClickType input = containerInput(Params.string(params, "clickType", "PICKUP"));
             return ClientThread.call(() -> clickSlot(index, button, input));
         });
         RpcRegistry.register("key", params -> {
@@ -133,10 +130,9 @@ public final class InputMethods {
         // MouseHandler stores window coordinates and scales them down to GUI coordinates itself.
         double rawX = guiX * window.getScreenWidth() / window.getGuiScaledWidth();
         double rawY = guiY * window.getScreenHeight() / window.getGuiScaledHeight();
-        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), rawX, rawY);
-        MouseButtonInfo info = new MouseButtonInfo(sdlButton, mods);
-        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onButton(window.handle(), info, InputConstants.PRESS);
-        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onButton(window.handle(), info, InputConstants.RELEASE);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.getWindow(), rawX, rawY);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onPress(window.getWindow(), sdlButton, InputConstants.PRESS, mods);
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onPress(window.getWindow(), sdlButton, InputConstants.RELEASE, mods);
         return screenChange(before, mc.screen);
     }
 
@@ -163,7 +159,7 @@ public final class InputMethods {
             y = guiY;
         }
         Window window = mc.getWindow();
-        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.handle(), x * window.getScreenWidth() / window.getGuiScaledWidth(),
+        ((MouseHandlerInvoker) mc.mouseHandler).mctest$onMove(window.getWindow(), x * window.getScreenWidth() / window.getGuiScaledWidth(),
                 y * window.getScreenHeight() / window.getGuiScaledHeight());
         out.addProperty("x", x);
         out.addProperty("y", y);
@@ -197,7 +193,7 @@ public final class InputMethods {
 
     // ---- container ----
 
-    private static JsonElement clickSlot(int index, int button, ContainerInput input) {
+    private static JsonElement clickSlot(int index, int button, ClickType input) {
         Minecraft mc = ClientThread.mc();
         if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
             throw new RpcException("No container screen open (current: " + describe(mc.screen) + ")");
@@ -206,7 +202,7 @@ public final class InputMethods {
         if (index != AbstractContainerMenu.SLOT_CLICKED_OUTSIDE && (index < 0 || index >= menu.slots.size())) {
             throw new RpcException("Slot index " + index + " out of range 0.." + (menu.slots.size() - 1) + " (or -999 for outside)");
         }
-        mc.gameMode.handleContainerInput(menu.containerId, index, button, input, mc.player);
+        mc.gameMode.handleInventoryMouseClick(menu.containerId, index, button, input, mc.player);
 
         // The client predicts the result immediately; the server confirms a tick or two later.
         JsonObject out = new JsonObject();
@@ -217,10 +213,10 @@ public final class InputMethods {
         return out;
     }
 
-    private static ContainerInput containerInput(String name) {
+    private static ClickType containerInput(String name) {
         String normalized = name.trim().toUpperCase(Locale.ROOT).replace('-', '_');
         try {
-            return ContainerInput.valueOf(normalized);
+            return ClickType.valueOf(normalized);
         } catch (IllegalArgumentException e) {
             throw new RpcException("Unknown clickType '" + name + "'. Use one of PICKUP, QUICK_MOVE, SWAP, CLONE, THROW, QUICK_CRAFT, PICKUP_ALL");
         }
@@ -231,18 +227,17 @@ public final class InputMethods {
     private static JsonElement key(int keyCode, int mods, String action) {
         Minecraft mc = ClientThread.mc();
         Screen before = mc.screen;
-        long handle = mc.getWindow().handle();
-        KeyEvent event = new KeyEvent(keyCode, GLFW.glfwGetKeyScancode(keyCode), mods);
-        KeyboardHandlerInvoker keyboard = (KeyboardHandlerInvoker) mc.keyboardHandler;
+        long handle = mc.getWindow().getWindow();
+        int scanCode = GLFW.glfwGetKeyScancode(keyCode);
         // "press" keeps the key down (for hasShiftDown()-style polling) until a matching "release".
         HeldKeys.withModifiers(mods, () -> {
             if (!action.equals("release")) {
                 HeldKeys.press(keyCode);
-                keyboard.mctest$keyPress(handle, InputConstants.PRESS, event);
+                mc.keyboardHandler.keyPress(handle, keyCode, scanCode, InputConstants.PRESS, mods);
             }
             if (!action.equals("press")) {
                 HeldKeys.release(keyCode);
-                keyboard.mctest$keyPress(handle, InputConstants.RELEASE, event);
+                mc.keyboardHandler.keyPress(handle, keyCode, scanCode, InputConstants.RELEASE, mods);
             }
             return null;
         });
@@ -251,9 +246,9 @@ public final class InputMethods {
         out.add("heldKeys", heldKeys());
         // What polling code (e.g. "hold shift for details" tooltips) sees now.
         JsonObject down = new JsonObject();
-        down.addProperty("shift", mc.hasShiftDown());
-        down.addProperty("ctrl", mc.hasControlDown());
-        down.addProperty("alt", mc.hasAltDown());
+        down.addProperty("shift", Screen.hasShiftDown());
+        down.addProperty("ctrl", Screen.hasControlDown());
+        down.addProperty("alt", Screen.hasAltDown());
         out.add("modifiersDown", down);
         return out;
     }
@@ -268,8 +263,8 @@ public final class InputMethods {
     private static JsonElement type(String text) {
         Minecraft mc = ClientThread.mc();
         requireScreen();
-        long handle = mc.getWindow().handle();
-        text.codePoints().forEach(c -> ((KeyboardHandlerInvoker) mc.keyboardHandler).mctest$charTyped(handle, new CharacterEvent(c)));
+        long handle = mc.getWindow().getWindow();
+        text.codePoints().forEach(c -> ((KeyboardHandlerInvoker) mc.keyboardHandler).mctest$charTyped(handle, c, 0));
         JsonObject out = new JsonObject();
         out.addProperty("typed", text.codePointCount(0, text.length()));
         return out;
@@ -322,10 +317,10 @@ public final class InputMethods {
         int mods = 0;
         for (JsonElement n : names) {
             mods |= switch (n.getAsString().toLowerCase(Locale.ROOT)) {
-                case "shift" -> InputConstants.MOD_SHIFT;
-                case "ctrl", "control" -> InputConstants.MOD_CONTROL;
-                case "alt" -> InputConstants.MOD_ALT;
-                case "super", "meta", "cmd", "win" -> InputConstants.MOD_SUPER;
+                case "shift" -> GLFW.GLFW_MOD_SHIFT;
+                case "ctrl", "control" -> GLFW.GLFW_MOD_CONTROL;
+                case "alt" -> GLFW.GLFW_MOD_ALT;
+                case "super", "meta", "cmd", "win" -> GLFW.GLFW_MOD_SUPER;
                 default -> throw new RpcException("Unknown modifier '" + n.getAsString() + "'. Use shift, ctrl, alt, super");
             };
         }

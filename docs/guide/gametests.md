@@ -5,17 +5,20 @@ rebuild, and check it in one loop.
 
 | Tool | What it does |
 |---|---|
-| `mc_gametest_list {filter?}` | GameTests registered in the singleplayer world: vanilla, your mod's, and datapack test instances |
-| `mc_gametest_run {tests?, timeoutSeconds?}` | Run tests (`/test run <selector>`) and wait. Returns pass/fail per test with the failure message and position, plus an overall `success` |
+| `mc_gametest_list {filter?}` | GameTests registered through the loader's GameTest API, with their batch and structure |
+| `mc_gametest_run {tests?, timeoutSeconds?}` | Run tests (like `/test run`) and wait. Returns pass/fail per test with the failure message and position, plus an overall `success` |
 
 ```
 mc_world_create {name:"gt", flat:true}
 → mc_gametest_run {tests:"mymod:*"}
 ```
 
-- Register tests through the Fabric or NeoForge GameTest API, or as `test_instance` JSON in a datapack.
-- Use a **flat** test world: tests are placed near the world spawn.
-- A world whose datapacks add registry content shows the "experimental settings / backup" prompt on load.
-  `mc_world_join` answers it for you unless you pass `confirmPrompts: false`.
+- Register tests through the Fabric or NeoForge GameTest API (`@GameTest` methods; 1.21.1 has no data-driven test
+  instances). On NeoForge, enable your namespace with `neoforge.enabledGameTestNamespaces` in your run configs.
+- Selectors match the test name (`myclass.mytest`), the structure id (`mymod:myclass.mytest`), or
+  `<structure namespace>:<test name>`; `*` is a wildcard. `mymod:*` runs the tests whose structures live in `mymod`.
+  Manual-only tests run only when named without a wildcard.
+- Use a **flat** test world: tests are placed next to the player (or the world spawn on a server with nobody on).
+- Vanilla 1.21.1 only ticks GameTests in its IDE mode; MCTest ticks the tests it starts itself.
 - The same tools exist on a dedicated server as `mc_server_gametest_list` and `mc_server_gametest_run`. See
   [Dedicated servers](/guide/dedicated-server).

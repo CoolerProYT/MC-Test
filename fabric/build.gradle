@@ -1,11 +1,15 @@
 plugins {
     id 'multiloader-loader'
-    id 'net.fabricmc.fabric-loom'
+    id 'net.fabricmc.fabric-loom-remap'
 }
 dependencies {
     minecraft("com.mojang:minecraft:${minecraft_version}")
-    implementation("net.fabricmc:fabric-loader:${fabric_loader_version}")
-    implementation("net.fabricmc.fabric-api:fabric-api:${fabric_version}")
+    mappings(loom.layered {
+        officialMojangMappings()
+        parchment("org.parchmentmc.data:parchment-${parchment_minecraft}:${parchment_version}@zip")
+    })
+    modImplementation("net.fabricmc:fabric-loader:${fabric_loader_version}")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:${fabric_version}")
 }
 
 loom {
@@ -14,6 +18,10 @@ loom {
         accessWidenerPath.set(aw)
     }
     runs {
+        configureEach {
+            // MCTest's own GameTest fixture (mctest_selftest:*) for the test suites; never set in mods' runs.
+            vmArg('-Dmctest.selftest=true')
+        }
         client {
             client()
             setConfigName('Fabric Client')

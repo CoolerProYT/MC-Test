@@ -11,7 +11,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -22,17 +21,17 @@ import java.util.concurrent.ExecutionException;
  * Handles {@code {id, method, params}} frames and replies with {@code {id, result}} or {@code {id, error}}.
  * Requests are handled concurrently; responses are matched by id, not by order.
  */
-final class RpcFrameHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
+final class RpcFrameHandler extends SimpleChannelInboundHandler<String> {
 
     private static final Gson GSON = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
 
     @Override
-    protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
+    protected void channelRead0(ChannelHandlerContext ctx, String frame) {
         JsonElement id = JsonNull.INSTANCE;
         String method;
         JsonObject params;
         try {
-            JsonObject request = JsonParser.parseString(frame.text()).getAsJsonObject();
+            JsonObject request = JsonParser.parseString(frame).getAsJsonObject();
             if (request.has("id")) {
                 id = request.get("id");
             }
@@ -58,7 +57,7 @@ final class RpcFrameHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     private static void send(ChannelHandlerContext ctx, JsonObject response) {
         if (ctx.channel().isActive()) {
-            ctx.writeAndFlush(new TextWebSocketFrame(GSON.toJson(response)));
+            WebSocketCodec.sendText(ctx, GSON.toJson(response));
         }
     }
 

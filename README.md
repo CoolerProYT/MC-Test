@@ -1,6 +1,6 @@
 # MCTest
 
-A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 26.1.2) plus an **MCP server**, so Claude Code (or any
+A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 1.21.1) plus an **MCP server**, so Claude Code (or any
 coding agent, or your own scripts) can drive a running Minecraft client the way Playwright drives a browser: open
 worlds, click GUIs, press keys, walk, mine, place, craft, fight, run commands, inspect blocks, entities and inventories,
 read logs and take screenshots. The main use is testing your own mods.
@@ -25,7 +25,7 @@ Claude Code ──stdio/MCP──▶ mcp/ (Node) ──WebSocket JSON-RPC──�
 ### Where to get it
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-fabric-26.1.2:<version>` and `com.coolerpromc.mctest:mctest-neoforge-26.1.2:<version>`.
+`com.coolerpromc.mctest:mctest-fabric-1.21.1:<version>` and `com.coolerpromc.mctest:mctest-neoforge-1.21.1:<version>`.
 The snippets below use that repository. If you're changing MCTest itself, run `./gradlew publishToMavenLocal` and use
 `mavenLocal()` instead to pick up your local build.
 
@@ -48,11 +48,12 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.1.2.1") { transitive = false }
+    // 1.21.1 is obfuscated: modLocalRuntime remaps MCTest to your mappings.
+    modLocalRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:1.21.1.1") { transitive = false }
 }
 ```
 
-`localRuntime` is Loom's dev-runtime configuration. `transitive = false` stops MCTest's own `fabric-api` /
+`modLocalRuntime` is Loom's dev-runtime configuration for mods (`localRuntime` on 26.x, which needs no remapping). `transitive = false` stops MCTest's own `fabric-api` /
 `fabric-loader` runtime dependencies from overriding your versions.
 
 ### NeoForge (ModDevGradle), in your mod's `neoforge/build.gradle`
@@ -71,7 +72,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.1.2.1") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:1.21.1.1") { transitive = false }
 }
 ```
 
@@ -222,7 +223,7 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_close_all` | `quit` / `stop`, then kill | Close every client and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
 | `mc_crash_report` | (reads files) | Newest crash report or JVM `hs_err` log of the client or server, also after the game has died |
 | `mc_gametest_list` | `gametest.list {filter?}` | GameTests registered in the singleplayer world (vanilla, your mod's, datapack test instances) |
-| `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (`/test run <selector>`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
+| `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (like `/test run`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
 | `mc_world_list` | `world.list` | Worlds in the saves folder |
 | `mc_world_delete` | `world.delete {name}` | Delete a world (not the open one) |
 | `mc_time_freeze` / `mc_time_unfreeze` | `time.freeze` / `time.unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act |
@@ -306,7 +307,10 @@ of a hole with no exposed stone), which is where pathfinding that can place bloc
   mod's startup errors are visible on both loaders.
 - **Tutorial hints are skipped.** Toasts like "Look around" would otherwise cover screenshots. Use
   `-Dmctest.tutorial=true` to keep them.
-- **Input is GLFW in 26.1.2.** Raw key numbers for `mc_key` are GLFW key codes (26.3+ uses SDL scancodes). Use names, which work on every version.
+- **Input is GLFW in 1.21.1.** Raw key numbers for `mc_key` are GLFW key codes (26.3+ uses SDL scancodes). Use names, which work on every version.
+- **GameTests are registered in code in 1.21.1.** `mc_gametest_run` selectors match the test name
+  (`myclass.mytest`), the structure id, or `<structure namespace>:<test name>`, so `mymod:*` runs the tests whose
+  structures live in `mymod`. MCTest ticks the tests itself, so they run outside vanilla's IDE mode too.
 - **Your mouse is left alone.** Vanilla captures the OS cursor whenever a screen closes in-world and warps it to the
   window centre whenever one opens, so an agent opening and closing screens or entering worlds would keep trapping or
   yanking your mouse while you work in another app. With MCTest, the game only captures or moves the cursor within
@@ -381,7 +385,7 @@ node scripts/server-test.mjs          # dedicated server: also start ./gradlew :
 cd mcp && npm test                    # MCP server end to end over stdio
 ```
 
-All of these pass on both Fabric and NeoForge for 26.1.2. `survival-test` depends on the terrain around the spawn
+All of these pass on both Fabric and NeoForge for 1.21.1. `survival-test` depends on the terrain around the spawn
 point and passes on most seeds (see above).
 
 ## License

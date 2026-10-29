@@ -14,7 +14,7 @@ Claude Code ──stdio/MCP──▶ mctest-mcp (Node) ──WebSocket JSON-RPC�
 ## 1. Add the mod to your mod's dev runtime
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-fabric-26.1.2:<version>` and `com.coolerpromc.mctest:mctest-neoforge-26.1.2:<version>`.
+`com.coolerpromc.mctest:mctest-fabric-1.21.1:<version>` and `com.coolerpromc.mctest:mctest-neoforge-1.21.1:<version>`.
 
 Latest releases (updated automatically from the Maven repository; use the one for your Minecraft version):
 
@@ -35,7 +35,8 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:26.1.2.1") { transitive = false }
+    // 1.21.1 is obfuscated: modLocalRuntime remaps MCTest to your mappings.
+    modLocalRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:1.21.1.1") { transitive = false }
 }
 ```
 
@@ -51,7 +52,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:26.1.2.1") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:1.21.1.1") { transitive = false }
 }
 ```
 

@@ -100,7 +100,7 @@ same thing over the [raw protocol](/reference/protocol). Coordinates in GUI tool
 | Tool | Method | What it does |
 |---|---|---|
 | `mc_gametest_list` | `gametest.list {filter?}` | GameTests registered in the singleplayer world (vanilla, your mod's, datapack test instances) |
-| `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (`/test run <selector>`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
+| `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (like `/test run`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
 
 ## Anything else
 

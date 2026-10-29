@@ -2,9 +2,8 @@ package com.coolerpromc.mctest.mixin;
 
 import com.coolerpromc.mctest.input.InputGuard;
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.MouseHandler;
-import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.client.Minecraft;
 import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -22,8 +21,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(MouseHandler.class)
 public abstract class MouseHandlerMixin {
 
-    @Inject(method = "onButton(JLnet/minecraft/client/input/MouseButtonInfo;I)V", at = @At("HEAD"))
-    private void mctest$noteRealClick(long handle, MouseButtonInfo info, int action, CallbackInfo ci) {
+    @Inject(method = "onPress(JIII)V", at = @At("HEAD"))
+    private void mctest$noteRealClick(long handle, int button, int action, int modifiers, CallbackInfo ci) {
         InputGuard.noteInput();
     }
 
@@ -36,13 +35,13 @@ public abstract class MouseHandlerMixin {
     }
 
     @Redirect(method = "releaseMouse()V", at = @At(value = "INVOKE",
-            target = "Lcom/mojang/blaze3d/platform/InputConstants;grabOrReleaseMouse(Lcom/mojang/blaze3d/platform/Window;IDD)V"))
-    private void mctest$releaseWithoutWarp(Window window, int cursorMode, double x, double y) {
-        if (InputGuard.userIsActive() && window.isFocused()) {
+            target = "Lcom/mojang/blaze3d/platform/InputConstants;grabOrReleaseMouse(JIDD)V"))
+    private void mctest$releaseWithoutWarp(long window, int cursorMode, double x, double y) {
+        if (InputGuard.userIsActive() && Minecraft.getInstance().isWindowActive()) {
             InputConstants.grabOrReleaseMouse(window, cursorMode, x, y);
         } else {
             // Same as vanilla minus moving your cursor: just show the normal cursor again.
-            GLFW.glfwSetInputMode(window.handle(), GLFW.GLFW_CURSOR, cursorMode);
+            GLFW.glfwSetInputMode(window, GLFW.GLFW_CURSOR, cursorMode);
         }
     }
 }

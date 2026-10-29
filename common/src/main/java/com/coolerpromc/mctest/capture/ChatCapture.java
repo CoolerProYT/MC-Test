@@ -2,7 +2,7 @@ package com.coolerpromc.mctest.capture;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import net.minecraft.client.multiplayer.chat.GuiMessageSource;
+import net.minecraft.client.GuiMessageTag;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
@@ -24,13 +24,14 @@ public final class ChatCapture {
         return s;
     }
 
-    public static void onMessage(Component content, GuiMessageSource source) {
+    /** {@code source} mirrors the 26.x GuiMessageSource names: SYSTEM_SERVER for system lines, PLAYER otherwise. */
+    public static void onMessage(Component content, GuiMessageTag tag) {
         if (SESSIONS.isEmpty()) {
             return;
         }
         JsonObject line = new JsonObject();
         line.addProperty("text", content.getString());
-        line.addProperty("source", source.name());
+        line.addProperty("source", tag != null && "System".equals(tag.logTag()) ? "SYSTEM_SERVER" : "PLAYER");
         for (Session s : SESSIONS) {
             s.lines.add(line);
         }

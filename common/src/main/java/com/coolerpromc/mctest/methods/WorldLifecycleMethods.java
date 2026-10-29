@@ -20,9 +20,12 @@ import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.client.gui.screens.GenericMessageScreen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.util.FileUtil;
+import net.minecraft.FileUtil;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
@@ -127,12 +130,12 @@ public final class WorldLifecycleMethods {
         } catch (Exception e) {
             throw new RpcException("Could not pick a folder for '" + spec.name() + "': " + e.getMessage());
         }
-        LevelSettings settings = new LevelSettings(spec.name(), spec.gameType(),
-                new LevelSettings.DifficultySettings(spec.difficulty(), spec.hardcore(), false), spec.cheats(), WorldDataConfiguration.DEFAULT);
+        LevelSettings settings = new LevelSettings(spec.name(), spec.gameType(), spec.hardcore(), spec.difficulty(), spec.cheats(),
+                new GameRules(), WorldDataConfiguration.DEFAULT);
         WorldOptions options = new WorldOptions(spec.seed().orElse(WorldOptions.randomSeed()), spec.structures(), spec.bonusChest());
         ResourceKey<WorldPreset> preset = spec.flat() ? WorldPresets.FLAT : WorldPresets.NORMAL;
-        Function<HolderLookup.Provider, WorldDimensions> dimensions =
-                registries -> registries.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(preset).value().createWorldDimensions();
+        Function<RegistryAccess, WorldDimensions> dimensions =
+                registries -> registries.registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(preset).value().createWorldDimensions();
 
         // Run outside this task so the request is acknowledged before the (blocking) load starts.
         mc.execute(() -> {
@@ -301,7 +304,15 @@ public final class WorldLifecycleMethods {
     /** Same as the pause menu's "Save and Quit to Title" (saves and stops the integrated server) or "Disconnect". */
     private static void leaveIfInWorld(Minecraft mc) {
         if (mc.level != null) {
-            mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
+            // What the pause menu's button does in 1.21.1.
+            boolean local = mc.isLocalServer();
+            mc.level.disconnect();
+            if (local) {
+                mc.disconnect(new GenericMessageScreen(Component.translatable("menu.savingLevel")));
+            } else {
+                mc.disconnect();
+            }
+            mc.setScreen(new TitleScreen());
         }
     }
 

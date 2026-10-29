@@ -56,9 +56,9 @@ public final class StatusMethods {
         out.add("screen", describeScreen(screen));
         out.addProperty("overlay", mc.getOverlay() == null ? null : mc.getOverlay().getClass().getName());
         out.addProperty("singleplayer", mc.isLocalServer());
-        out.addProperty("windowFocused", mc.getWindow().isFocused());
+        out.addProperty("windowFocused", mc.isWindowActive());
         out.addProperty("mouseGrabbed", mc.mouseHandler.isMouseGrabbed());
-        out.addProperty("minecraftVersion", SharedConstants.getCurrentVersion().name());
+        out.addProperty("minecraftVersion", SharedConstants.getCurrentVersion().getName());
         out.addProperty("loader", Services.PLATFORM.getPlatformName());
         out.addProperty("loaderVersion", Services.PLATFORM.getLoaderVersion());
         out.addProperty("gameDir", mc.gameDirectory.toPath().toAbsolutePath().normalize().toString());

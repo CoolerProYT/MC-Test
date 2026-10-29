@@ -63,10 +63,10 @@ public final class MCTestServer {
     public static void onServerStarted(MinecraftServer s) {
         server = s;
         state = "running";
-        // New 26.x servers whitelist by default, which locks dev clients out. Turned off at start (like
+        // A whitelisted server locks dev clients out (26.x servers even whitelist by default). Turned off at start (like
         // `/whitelist off`), so `/whitelist on` still works for tests that need it. Keep it with -Dmctest.whitelist=true.
-        if (Services.PLATFORM.isDevelopmentEnvironment() && !Boolean.getBoolean("mctest.whitelist") && s.isUsingWhitelist()) {
-            s.setUsingWhitelist(false);
+        if (Services.PLATFORM.isDevelopmentEnvironment() && !Boolean.getBoolean("mctest.whitelist") && s.getPlayerList().isUsingWhitelist()) {
+            s.getPlayerList().setUsingWhiteList(false);
             Constants.LOG.warn("MCTest: turned the whitelist off so dev clients can join (keep it with -Dmctest.whitelist=true)");
         }
         Constants.LOG.info("MCTest server ready (control API on ws://{}:{}/)", ControlServer.HOST, ControlServer.configuredServerPort());
@@ -92,9 +92,9 @@ public final class MCTestServer {
         for (ServerPlayer p : players.getPlayers()) {
             online.add(p.getUUID());
             // Once per join, so a test that deops a player is not undone until they rejoin.
-            if (AUTO_OPPED.add(p.getUUID()) && !players.isOp(p.nameAndId())) {
-                players.op(p.nameAndId());
-                Constants.LOG.info("MCTest: opped {} (dev server; disable with -Dmctest.autoOp=false)", p.getGameProfile().name());
+            if (AUTO_OPPED.add(p.getUUID()) && !players.isOp(p.getGameProfile())) {
+                players.op(p.getGameProfile());
+                Constants.LOG.info("MCTest: opped {} (dev server; disable with -Dmctest.autoOp=false)", p.getGameProfile().getName());
             }
         }
         AUTO_OPPED.retainAll(online);

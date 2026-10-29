@@ -9,18 +9,24 @@ import com.coolerpromc.mctest.util.Describe;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import net.minecraft.commands.CommandSource;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.GameTestAssertPosException;
 import net.minecraft.gametest.framework.GameTestInfo;
+import net.minecraft.gametest.framework.GameTestRegistry;
+import net.minecraft.gametest.framework.GameTestRunner;
+import net.minecraft.gametest.framework.GameTestTicker;
 import net.minecraft.gametest.framework.GlobalTestReporter;
 import net.minecraft.gametest.framework.LogTestReporter;
+import net.minecraft.gametest.framework.RetryOptions;
+import net.minecraft.gametest.framework.StructureGridSpawner;
+import net.minecraft.gametest.framework.TestFunction;
 import net.minecraft.gametest.framework.TestReporter;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.Util;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.Util;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
 import java.util.ArrayList;
@@ -32,15 +38,28 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
- * Runs GameTests (vanilla's and the tested mod's, registered through the loader's GameTest API) with {@code /test run}
- * and reports each test's result. Shared by the client (integrated server) and the dedicated server.
+ * Runs GameTests (the tested mod's, registered through the loader's GameTest API into {@link GameTestRegistry}) the way
+ * {@code /test run} does, and reports each test's result. Shared by the client (integrated server) and the dedicated
+ * server. 1.21.1 only ticks GameTests in vanilla's IDE mode, so {@link #tickIfNeeded} drives them otherwise.
  */
 public final class GameTestMethods {
 
     private static final List<Session> SESSIONS = new CopyOnWriteArrayList<>();
     private static boolean reporterInstalled;
+    /** Server tick on which {@link GameTestTicker#SINGLETON} last ticked (set by GameTestTickerMixin). */
+    public static volatile int lastTickerTick = -1;
+    private static volatile MinecraftServer currentServer;
+
+    public static MinecraftServer currentServer() {
+        return currentServer;
+    }
+
+    public static void setCurrentServer(MinecraftServer server) {
+        currentServer = server;
+    }
 
     private GameTestMethods() {
     }
@@ -48,6 +67,7 @@ public final class GameTestMethods {
     /** @param server the server to run on; must throw a readable {@link RpcException} when there is none */
     public static void register(Supplier<MinecraftServer> server) {
         installReporter();
+        SelfTests.register();
         RpcRegistry.register("gametest.list", params -> {
             String filter = Params.string(params, "filter", null);
             MinecraftServer s = server.get();
@@ -92,67 +112,93 @@ public final class GameTestMethods {
     private static JsonElement list(MinecraftServer server, String filter) {
         String f = filter == null ? null : filter.toLowerCase(Locale.ROOT);
         JsonArray tests = new JsonArray();
-        server.registryAccess().lookupOrThrow(Registries.TEST_INSTANCE).listElements().forEach(holder -> {
-            String id = holder.key().identifier().toString();
-            if (f != null && !id.contains(f)) return;
-            JsonObject t = new JsonObject();
-            t.addProperty("id", id);
-            t.addProperty("structure", holder.value().structure().toString());
-            t.addProperty("maxTicks", holder.value().maxTicks());
-            t.addProperty("required", holder.value().required());
-            t.addProperty("manualOnly", holder.value().manualOnly());
-            tests.add(t);
-        });
+        GameTestRegistry.getAllTestFunctions().stream()
+                .sorted(java.util.Comparator.comparing(TestFunction::testName))
+                .forEach(fn -> {
+                    if (f != null && !fn.testName().toLowerCase(Locale.ROOT).contains(f)
+                            && !fn.structureName().toLowerCase(Locale.ROOT).contains(f)) return;
+                    JsonObject t = new JsonObject();
+                    t.addProperty("id", fn.testName());
+                    t.addProperty("batch", fn.batchName());
+                    t.addProperty("structure", fn.structureName());
+                    t.addProperty("maxTicks", fn.maxTicks());
+                    t.addProperty("required", fn.required());
+                    t.addProperty("manualOnly", fn.manualOnly());
+                    tests.add(t);
+                });
         JsonObject out = new JsonObject();
         out.addProperty("count", tests.size());
         out.add("tests", tests);
         return out;
     }
 
+    /**
+     * Selector: {@code *} (every test), a test name ({@code mytests.place_block}), or a glob over the test name, the
+     * structure id ({@code mymod:mytests.place_block}) or {@code <structure namespace>:<test name>}. So {@code mymod:*}
+     * picks the tests whose structures live in {@code mymod}. Manual-only tests only run when named without wildcards.
+     */
+    private static boolean matches(TestFunction fn, String selector) {
+        String sel = selector.toLowerCase(Locale.ROOT);
+        String name = fn.testName().toLowerCase(Locale.ROOT);
+        String structure = fn.structureName().toLowerCase(Locale.ROOT);
+        ResourceLocation id = ResourceLocation.tryParse(structure);
+        String namespaced = (id == null ? "minecraft" : id.getNamespace()) + ":" + name;
+        if (!sel.contains("*")) {
+            return sel.equals(name) || sel.equals(structure) || sel.equals(namespaced);
+        }
+        if (fn.manualOnly()) return false;
+        if (sel.equals("*") || sel.equals("*:*")) return true;
+        Pattern glob = Pattern.compile(("\\Q" + sel + "\\E").replace("*", "\\E.*\\Q"));
+        return glob.matcher(name).matches() || glob.matcher(structure).matches() || glob.matcher(namespaced).matches();
+    }
+
+    /** Ticks the running GameTests when the game itself does not (anywhere but vanilla's IDE mode). Server thread. */
+    public static void tickIfNeeded(MinecraftServer server) {
+        if (SESSIONS.isEmpty() || lastTickerTick == server.getTickCount() || !server.tickRateManager().runsNormally()) return;
+        GameTestTicker.SINGLETON.tick();
+    }
+
     // ---- run ----
 
     private static CompletableFuture<JsonElement> run(MinecraftServer server, String tests, long timeoutMs) {
-        Session session = new Session(tests);
-        List<String> output = new ArrayList<>();
-        CommandSource sink = new CommandSource() {
-            @Override
-            public void sendSystemMessage(Component message) {
-                output.add(message.getString());
-                if (message.getContents() instanceof TranslatableContents t && t.getKey().equals("commands.test.run.running")
-                        && t.getArgs().length > 0) {
-                    try {
-                        session.expected = Integer.parseInt(String.valueOf(t.getArgs()[0] instanceof Component c ? c.getString() : t.getArgs()[0]));
-                    } catch (NumberFormatException ignored) {
-                        // Left at -1: completes on timeout instead.
-                    }
-                }
-            }
-
-            @Override
-            public boolean acceptsSuccess() {
-                return true;
-            }
-
-            @Override
-            public boolean acceptsFailure() {
-                return true;
-            }
-
-            @Override
-            public boolean shouldInformAdmins() {
-                return false;
-            }
-        };
-        SESSIONS.add(session);
-        Constants.LOG.info("MCTest: /test run {}", tests);
-        server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSource(sink), "test run " + tests);
-
-        if (session.expected <= 0) {
-            SESSIONS.remove(session);
-            // Nothing started: no match, a bad selector, or a structure problem. The command said why.
-            throw new RpcException("No tests started for '" + tests + "': " + String.join(" | ", output)
-                    + " (gametest.list shows the registered tests)");
+        List<TestFunction> functions = GameTestRegistry.getAllTestFunctions().stream().filter(fn -> matches(fn, tests)).toList();
+        if (functions.isEmpty()) {
+            throw new RpcException("No tests match '" + tests + "' (gametest.list shows the registered tests)");
         }
+        SelfTests.ensureStructure(server);
+        // Next to the first player (like /test run), else at the overworld spawn.
+        ServerPlayer player = server.getPlayerList().getPlayers().isEmpty() ? null : server.getPlayerList().getPlayers().get(0);
+        ServerLevel level = player != null ? player.serverLevel() : server.overworld();
+        BlockPos around = player != null ? player.blockPosition() : level.getSharedSpawnPos();
+        BlockPos start = new BlockPos(around.getX(), level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, around).getY() + 1, around.getZ() + 3);
+
+        List<String> missing = new ArrayList<>();
+        List<GameTestInfo> infos = new ArrayList<>();
+        for (TestFunction fn : functions) {
+            ResourceLocation structure = ResourceLocation.tryParse(fn.structureName());
+            if (structure == null || level.getStructureManager().get(structure).isEmpty()) {
+                missing.add(fn.testName() + " (structure " + fn.structureName() + ")");
+            } else {
+                infos.add(new GameTestInfo(fn, fn.rotation(), level, RetryOptions.noRetries()));
+            }
+        }
+        if (infos.isEmpty()) {
+            throw new RpcException("No tests started for '" + tests + "': test structures not found: " + String.join(", ", missing));
+        }
+
+        Session session = new Session(tests);
+        session.expected = infos.size();
+        missing.forEach(session.skipped::add);
+        SESSIONS.add(session);
+        Constants.LOG.info("MCTest: running {} GameTest(s) for {}", infos.size(), tests);
+        GameTestTicker.SINGLETON.clear(); // what /test does first: stops a previous run
+        GameTestRunner.clearMarkers(level);
+        GameTestRegistry.forgetFailedTests();
+        GameTestRunner.Builder.fromInfo(infos, level)
+                .newStructureSpawner(new StructureGridSpawner(start, 8, false))
+                .build()
+                .start();
+
         session.checkDone();
         return session.future
                 .completeOnTimeout(null, timeoutMs, TimeUnit.MILLISECONDS)
@@ -167,6 +213,8 @@ public final class GameTestMethods {
         final CompletableFuture<Boolean> future = new CompletableFuture<>();
         /** Last result per test id (retries replace earlier attempts). */
         final Map<String, JsonObject> results = new LinkedHashMap<>();
+        /** Matching tests that could not start (missing structure). */
+        final JsonArray skipped = new JsonArray();
         volatile int expected = -1;
 
         Session(String selector) {
@@ -175,12 +223,12 @@ public final class GameTestMethods {
 
         synchronized void record(GameTestInfo info, boolean passed) {
             JsonObject r = new JsonObject();
-            r.addProperty("id", info.id().toString());
+            r.addProperty("id", info.getTestName());
             r.addProperty("passed", passed);
             r.addProperty("required", info.isRequired());
             r.addProperty("ms", info.getRunTime());
             r.addProperty("ticks", ((GameTestInfoAccessor) info).mctest$getTick());
-            BlockPos testPos = info.getTestBlockPos();
+            BlockPos testPos = info.getStructureBlockPos();
             r.add("testPos", testPos == null ? null : Describe.pos(testPos));
             Throwable error = info.getError();
             if (!passed && error != null) {
@@ -194,7 +242,7 @@ public final class GameTestMethods {
                     r.addProperty("cause", Util.describeError(root));
                 }
             }
-            results.put(info.id().toString(), r);
+            results.put(info.getTestName(), r);
             checkDone();
         }
 
@@ -226,6 +274,7 @@ public final class GameTestMethods {
             // The verdict a CI step would use: every required test finished and passed.
             out.addProperty("success", !timedOut && failedRequired == 0 && results.size() >= expected);
             out.add("results", list);
+            if (!skipped.isEmpty()) out.add("skipped", skipped);
             return out;
         }
     }
