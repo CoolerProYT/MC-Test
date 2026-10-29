@@ -10,7 +10,6 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.appender.AbstractOutputStreamAppender;
 import org.apache.logging.log4j.core.config.Configuration;
-import org.apache.logging.log4j.core.config.Property;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -129,7 +128,7 @@ public final class LogCapture {
         }
         JsonObject line = new JsonObject();
         line.addProperty("seq", nextSeq++);
-        line.addProperty("time", event.getInstant().getEpochMillisecond());
+        line.addProperty("time", event.getTimeMillis());
         line.addProperty("level", event.getLevel().name());
         line.addProperty("logger", event.getLoggerName());
         line.addProperty("thread", event.getThreadName());
@@ -196,7 +195,7 @@ public final class LogCapture {
 
     private static final class Appender extends AbstractAppender {
         Appender() {
-            super(APPENDER_NAME, null, null, true, Property.EMPTY_ARRAY);
+            super(APPENDER_NAME, null, null, true); // the 4-argument constructor exists in every log4j a 1.20.1 loader ships
         }
 
         @Override

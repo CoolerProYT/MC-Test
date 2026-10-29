@@ -20,7 +20,7 @@ import java.util.function.Consumer;
  */
 public final class SelfTests {
 
-    public static final ResourceLocation STRUCTURE = ResourceLocation.fromNamespaceAndPath("mctest", "selftest_empty");
+    public static final ResourceLocation STRUCTURE = new ResourceLocation("mctest", "selftest_empty");
     private static boolean registered;
 
     public SelfTests() {

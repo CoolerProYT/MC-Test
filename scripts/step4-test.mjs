@@ -27,7 +27,7 @@ const chest = { x: x + 3, y, z };
 
 await check('command: setblock chest with items', async () => {
   const r = await mc.call('command', {
-    command: `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[{Slot:0b,id:"minecraft:diamond",count:5}]}`,
+    command: `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[{Slot:0b,id:"minecraft:diamond",Count:5b}]}`,
   });
   assert(r.output.some((l) => /Changed the block/.test(l.text)), JSON.stringify(r.output));
 });
@@ -43,7 +43,7 @@ await check('block (server) has state + block entity NBT', async () => {
 });
 
 await check('entities finds a summoned, named pig', async () => {
-  await mc.call('command', { command: `summon minecraft:pig ${x} ${y} ${z + 4} {CustomName:"Bacon",NoAI:1b}` });
+  await mc.call('command', { command: `summon minecraft:pig ${x} ${y} ${z + 4} {CustomName:'{"text":"Bacon"}',NoAI:1b}` });
   const r = await mc.call('entities', { radius: 8, type: 'pig' });
   assert(r.entities.some((e) => e.name === 'Bacon'), JSON.stringify(r.entities.map((e) => e.name)));
   return r.entities.map((e) => `${e.type} ${e.name} d=${e.distance.toFixed(1)} hp=${e.health}`);

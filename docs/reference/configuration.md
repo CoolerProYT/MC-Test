@@ -6,7 +6,7 @@ Set these as JVM arguments on the client or server run, for example:
 
 ```groovy
 // Fabric:   loom { runs { client { vmArg('-Dmctest.port=25600') } } }
-// NeoForge: neoForge { runs { client { systemProperty('mctest.port', '25600') } } }
+// Forge:  minecraft { runs { client { property 'mctest.port', '25600' } } }   (ForgeGradle)
 ```
 
 | Property | Default | Side | Meaning |

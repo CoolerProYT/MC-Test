@@ -2,7 +2,7 @@
 
 With the client running and the MCP server registered, describe the test in plain language:
 
-> Start the NeoForge client in the background, wait until it's ready, create a flat creative test world, give me a
+> Start the Forge client in the background, wait until it's ready, create a flat creative test world, give me a
 > `mymod:grinder`, place it, put 8 iron ore in it, wait 200 ticks, and check that it output iron dust. Screenshot the GUI.
 
 The agent turns that into tool calls like these:

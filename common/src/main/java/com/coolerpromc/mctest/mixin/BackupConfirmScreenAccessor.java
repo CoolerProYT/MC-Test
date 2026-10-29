@@ -7,6 +7,6 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(BackupConfirmScreen.class)
 public interface BackupConfirmScreenAccessor {
 
-    @Accessor("onProceed")
+    @Accessor("listener")
     BackupConfirmScreen.Listener mctest$getOnProceed();
 }

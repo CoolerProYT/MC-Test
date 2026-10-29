@@ -26,4 +26,4 @@ rootProject.name = 'MCTest'
 includeBuild('build-logic')
 include('common')
 include('fabric')
-include('neoforge')
+include('forge')

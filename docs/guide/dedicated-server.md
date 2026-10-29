@@ -6,7 +6,7 @@ puts it on `runServer`, where it opens a second control API on `ws://127.0.0.1:2
 talk to.
 
 ```bash
-./gradlew :fabric:runServer     # or :neoforge:runServer (first run: accept the EULA in runs/server/eula.txt)
+./gradlew :fabric:runServer     # or :forge:runServer (first run: accept the EULA in runs/server/eula.txt)
 ./gradlew :fabric:runClient     # in a second terminal
 ```
 

@@ -1,6 +1,6 @@
 # MCTest
 
-A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 1.21.1) plus an **MCP server**, so Claude Code (or any
+A **dev-only** Minecraft client mod (Fabric + Forge, Minecraft 1.20.1) plus an **MCP server**, so Claude Code (or any
 coding agent, or your own scripts) can drive a running Minecraft client the way Playwright drives a browser: open
 worlds, click GUIs, press keys, walk, mine, place, craft, fight, run commands, inspect blocks, entities and inventories,
 read logs and take screenshots. The main use is testing your own mods.
@@ -25,7 +25,7 @@ Claude Code ──stdio/MCP──▶ mcp/ (Node) ──WebSocket JSON-RPC──�
 ### Where to get it
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-fabric-1.21.1:<version>` and `com.coolerpromc.mctest:mctest-neoforge-1.21.1:<version>`.
+`com.coolerpromc.mctest:mctest-fabric-1.20.1:<version>` and `com.coolerpromc.mctest:mctest-forge-1.20.1:<version>`.
 The snippets below use that repository. If you're changing MCTest itself, run `./gradlew publishToMavenLocal` and use
 `mavenLocal()` instead to pick up your local build.
 
@@ -48,36 +48,51 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    // 1.21.1 is obfuscated: modLocalRuntime remaps MCTest to your mappings.
-    modLocalRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:1.21.1.1") { transitive = false }
+    // 1.20.1 is obfuscated: modLocalRuntime remaps MCTest to your mappings.
+    modLocalRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:1.20.1.1") { transitive = false }
 }
 ```
 
 `modLocalRuntime` is Loom's dev-runtime configuration for mods (`localRuntime` on 26.x, which needs no remapping). `transitive = false` stops MCTest's own `fabric-api` /
 `fabric-loader` runtime dependencies from overriding your versions.
 
-### NeoForge (ModDevGradle), in your mod's `neoforge/build.gradle`
+### Forge, in your mod's `forge/build.gradle` (or `build.gradle` in a Forge-only project)
 
-ModDevGradle has no built-in `localRuntime`, so declare one:
+Forge 1.20.1 jars are SRG-obfuscated, so MCTest has to be deobfuscated for your dev runs. With **ForgeGradle 6** (the
+1.20.1 MDK):
 
 ```groovy
 repositories {
     maven { url = 'https://maven.coolerpromc.com/releases/' }
 }
 
-// Runtime-only in dev, never published.
-configurations {
-    localRuntime
-    runtimeClasspath.extendsFrom localRuntime
+dependencies {
+    // Dev-only: deobfuscated for runClient/runServer, never in your jar or POM.
+    runtimeOnly(fg.deobf("com.coolerpromc.mctest:mctest-forge-${minecraft_version}:1.20.1.1")) { transitive = false }
 }
 
-dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:1.21.1.1") { transitive = false }
+minecraft {
+    runs {
+        configureEach {
+            // Needed for mixins from obfuscated mod jars (MCTest's) in a Mojang-mapped dev run. The 1.20.1 MDK
+            // leaves these out; without them the game stops at startup with "Mixin apply failed".
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+        }
+    }
 }
 ```
 
-Both setups were verified with a MultiLoader-template mod: MCTest loads in `runClient` on both loaders and does not
-appear in the built jar or the generated POM.
+With **ModDevGradle** (`net.neoforged.moddev.legacyforge`), which sets up the mixin remapping itself:
+
+```groovy
+dependencies {
+    modRuntimeOnly("com.coolerpromc.mctest:mctest-forge-${minecraft_version}:1.20.1.1") { transitive = false }
+}
+```
+
+These setups were verified with throwaway mods on Loom, ForgeGradle 6 and ModDevGradle: MCTest loads in `runClient`
+with its mixins applied.
 
 ### Changing the port (optional)
 
@@ -85,7 +100,7 @@ Default is `25599`. To run several clients at once, or avoid a clash, set a syst
 
 ```groovy
 // Fabric: loom { runs { client { vmArg('-Dmctest.port=25600') } } }
-// NeoForge: neoForge { runs { client { systemProperty('mctest.port', '25600') } } }
+// Forge:  minecraft { runs { client { property 'mctest.port', '25600' } } }   (ForgeGradle)
 ```
 
 Then give the MCP server the same port (`MCTEST_PORT`, below).
@@ -118,7 +133,7 @@ To share it with everyone working on a mod, commit a `.mcp.json` in that mod's r
 ```
 
 The server connects lazily and reconnects after the game restarts, so it can be registered once and left running.
-Start your client with `./gradlew :fabric:runClient` (or `:neoforge:runClient`), or let the agent start it with
+Start your client with `./gradlew :fabric:runClient` (or `:forge:runClient`), or let the agent start it with
 `mc_launch`; the agent then calls `mc_wait_ready`. When it has finished testing it calls `mc_close_all`, which closes
 every client and server; games started with `mc_launch` / `mc_server_launch` are also closed when the MCP session ends.
 
@@ -133,7 +148,7 @@ puts it on `runServer`, where it opens a second control API on `ws://127.0.0.1:2
 that the `mc_server_*` tools talk to.
 
 ```bash
-./gradlew :fabric:runServer     # or :neoforge:runServer (first run: accept the EULA in runs/server/eula.txt)
+./gradlew :fabric:runServer     # or :forge:runServer (first run: accept the EULA in runs/server/eula.txt)
 ./gradlew :fabric:runClient     # in a second terminal
 ```
 
@@ -160,7 +175,7 @@ API already reads the integrated server directly (`mc_block`, `mc_time_*`).
 
 ### A typical agent session
 
-> Start the NeoForge client in the background, wait until it's ready, create a flat creative test world, give me a
+> Start the Forge client in the background, wait until it's ready, create a flat creative test world, give me a
 > `mymod:grinder`, place it, put 8 iron ore in it, wait 200 ticks, and check that it output iron dust. Screenshot the GUI.
 
 which turns into calls like:
@@ -288,7 +303,7 @@ of a hole with no exposed stone), which is where pathfinding that can place bloc
   them to the result, so an exception your mod throws shows up right after the action that caused it. `mc_logs` has
   the full stacks. If the game crashes, the next call fails with a hint to use `mc_crash_report`.
 - **GameTests.** `mc_gametest_run {tests:"mymod:*"}` runs your mod's GameTests (registered through the Fabric or
-  NeoForge GameTest API) in the open world and returns each result, so an agent can write a GameTest, rebuild, and
+  Forge GameTest API) in the open world and returns each result, so an agent can write a GameTest, rebuild, and
   check it in one loop. Use a flat test world: tests are placed near the world spawn.
 
 - **Keybind actions apply on the next tick.** `mc_key {key:"e"}` returns before the inventory opens. Follow it with
@@ -302,13 +317,18 @@ of a hole with no exposed stone), which is where pathfinding that can place bloc
 - **Pause on lost focus is turned off.** The game window is usually not focused while an agent drives it, and vanilla
   would otherwise open the pause menu every time a screen closes. MCTest turns `pauseOnLostFocus` off in memory. To
   keep vanilla behaviour, launch with `-Dmctest.pauseOnLostFocus=true`.
-- **Logs from before MCTest loads.** On Fabric MCTest attaches in `preLaunch`, before any mod initializes. On NeoForge,
+- **Logs from before MCTest loads.** On Fabric MCTest attaches in `preLaunch`, before any mod initializes. On Forge,
   lines logged before MCTest is constructed are imported from `logs/latest.log` (flagged `backfilled: true`), so your
   mod's startup errors are visible on both loaders.
 - **Tutorial hints are skipped.** Toasts like "Look around" would otherwise cover screenshots. Use
   `-Dmctest.tutorial=true` to keep them.
-- **Input is GLFW in 1.21.1.** Raw key numbers for `mc_key` are GLFW key codes (26.3+ uses SDL scancodes). Use names, which work on every version.
-- **GameTests are registered in code in 1.21.1.** `mc_gametest_run` selectors match the test name
+- **Input is GLFW in 1.20.1.** Raw key numbers for `mc_key` are GLFW key codes (26.3+ uses SDL scancodes). Use names, which work on every version.
+- **Freezing time is MCTest's own on 1.20.1.** Vanilla only has `/tick` from 1.20.3, so `mc_time_freeze`,
+  `mc_time_step` and `mc_lockstep` use MCTest's freeze: chunks keep loading and players keep moving; time, weather,
+  block ticks, block entities and other entities stop.
+- **Item details use NBT on 1.20.1.** The `components` of an item stack list its NBT tags (`Damage`, `Enchantments`,
+  `display`), since data components only exist from 1.20.5.
+- **GameTests are registered in code in 1.20.1.** `mc_gametest_run` selectors match the test name
   (`myclass.mytest`), the structure id, or `<structure namespace>:<test name>`, so `mymod:*` runs the tests whose
   structures live in `mymod`. MCTest ticks the tests itself, so they run outside vanilla's IDE mode too.
 - **Your mouse is left alone.** Vanilla captures the OS cursor whenever a screen closes in-world and warps it to the
@@ -339,7 +359,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 
 ### Publishing a release
 
-`./gradlew publish` uploads the common, Fabric and NeoForge artifacts to the repository given by the `maven_url`,
+`./gradlew publish` uploads the common, Fabric and Forge artifacts to the repository given by the `maven_url`,
 `maven_username` and `maven_password` Gradle properties. Keep them in your user-level `~/.gradle/gradle.properties`,
 never in this repo:
 
@@ -355,7 +375,7 @@ Bump `version` in `gradle.properties` first; release repositories usually refuse
 ```
 common/    all logic (vanilla code only): server/, rpc/, methods/, capture/, tick/, mixin/
 fabric/    entrypoints + tick hook (ClientTickEvents) + platform service
-neoforge/  entrypoint + tick hook (ClientTickEvent.Post) + platform service
+forge/     entrypoint + tick hook (TickEvent.ClientTickEvent) + platform service
 mcp/       MCP server (TypeScript)
 scripts/   end-to-end test scripts
 ```
@@ -371,7 +391,7 @@ node scripts/run-tests.mjs                          # both loaders, all default 
 node scripts/run-tests.mjs fabric --suites step4,mcp
 ```
 
-Or run a single suite against a client you started yourself (`./gradlew :fabric:runClient` or `:neoforge:runClient`):
+Or run a single suite against a client you started yourself (`./gradlew :fabric:runClient` or `:forge:runClient`):
 
 ```bash
 node scripts/ws-test.mjs              # status + screenshot smoke test
@@ -385,7 +405,7 @@ node scripts/server-test.mjs          # dedicated server: also start ./gradlew :
 cd mcp && npm test                    # MCP server end to end over stdio
 ```
 
-All of these pass on both Fabric and NeoForge for 1.21.1. `survival-test` depends on the terrain around the spawn
+All of these pass on both Fabric and Forge for 1.20.1. `survival-test` depends on the terrain around the spawn
 point and passes on most seeds (see above).
 
 ## License

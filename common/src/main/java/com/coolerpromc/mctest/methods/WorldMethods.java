@@ -179,7 +179,7 @@ public final class WorldMethods {
         JsonArray effects = new JsonArray();
         for (MobEffectInstance e : p.getActiveEffects()) {
             JsonObject o = new JsonObject();
-            o.addProperty("id", e.getEffect().getRegisteredName());
+            o.addProperty("id", String.valueOf(BuiltInRegistries.MOB_EFFECT.getKey(e.getEffect())));
             o.addProperty("amplifier", e.getAmplifier());
             o.addProperty("duration", e.isInfiniteDuration() ? -1 : e.getDuration());
             effects.add(o);
@@ -188,13 +188,13 @@ public final class WorldMethods {
 
         JsonArray attributes = new JsonArray();
         // Every registered attribute (vanilla and modded) the player actually has.
-        BuiltInRegistries.ATTRIBUTE.holders()
+        BuiltInRegistries.ATTRIBUTE.stream()
                 .map(holder -> p.getAttributes().getInstance(holder))
                 .filter(java.util.Objects::nonNull)
-                .sorted(Comparator.comparing(a -> a.getAttribute().getRegisteredName()))
+                .sorted(Comparator.comparing(a -> String.valueOf(BuiltInRegistries.ATTRIBUTE.getKey(a.getAttribute()))))
                 .forEach((AttributeInstance a) -> {
                     JsonObject o = new JsonObject();
-                    o.addProperty("id", a.getAttribute().getRegisteredName());
+                    o.addProperty("id", String.valueOf(BuiltInRegistries.ATTRIBUTE.getKey(a.getAttribute())));
                     o.addProperty("value", a.getValue());
                     o.addProperty("base", a.getBaseValue());
                     attributes.add(o);

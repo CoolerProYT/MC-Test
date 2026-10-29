@@ -77,7 +77,7 @@ public final class Navigator {
     }
 
     private static boolean rayHits(Level level, Vec3 eye, Vec3 to, BlockPos block) {
-        BlockHitResult hit = level.clip(new ClipContext(eye, to, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, CollisionContext.empty()));
+        BlockHitResult hit = level.clip(new ClipContext(eye, to, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, net.minecraft.client.Minecraft.getInstance().player));
         return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(block);
     }
 

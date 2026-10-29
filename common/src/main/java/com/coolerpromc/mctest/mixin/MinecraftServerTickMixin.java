@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.function.BooleanSupplier;
 
-/** Drives MCTest-started GameTests on integrated and dedicated servers (see {@link GameTestMethods#tickIfNeeded}). */
+/** Drives MCTest-started GameTests (see {@link GameTestMethods#tickIfNeeded}) and counts down tick steps. */
 @Mixin(MinecraftServer.class)
 public abstract class MinecraftServerTickMixin {
 
@@ -21,5 +21,6 @@ public abstract class MinecraftServerTickMixin {
     @Inject(method = "tickChildren(Ljava/util/function/BooleanSupplier;)V", at = @At("TAIL"))
     private void mctest$tickGameTests(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
         GameTestMethods.tickIfNeeded((MinecraftServer) (Object) this);
+        com.coolerpromc.mctest.tick.TickControl.get().endTick();
     }
 }

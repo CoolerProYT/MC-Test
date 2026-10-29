@@ -13,12 +13,12 @@ mc_world_create {name:"gt", flat:true}
 → mc_gametest_run {tests:"mymod:*"}
 ```
 
-- Register tests through the Fabric or NeoForge GameTest API (`@GameTest` methods; 1.21.1 has no data-driven test
-  instances). On NeoForge, enable your namespace with `neoforge.enabledGameTestNamespaces` in your run configs.
+- Register tests through the Fabric or Forge GameTest API (`@GameTest` methods; 1.20.1 has no data-driven test
+  instances). On Forge, Forge only registers your tests with these run properties:
+  `property 'forge.enableGameTest', 'true'` and `property 'forge.enabledGameTestNamespaces', '<your mod id>'`.
 - Selectors match the test name (`myclass.mytest`), the structure id (`mymod:myclass.mytest`), or
   `<structure namespace>:<test name>`; `*` is a wildcard. `mymod:*` runs the tests whose structures live in `mymod`.
-  Manual-only tests run only when named without a wildcard.
 - Use a **flat** test world: tests are placed next to the player (or the world spawn on a server with nobody on).
-- Vanilla 1.21.1 only ticks GameTests in its IDE mode; MCTest ticks the tests it starts itself.
+- Vanilla 1.20.1 only ticks GameTests in its IDE mode; MCTest ticks the tests it starts itself.
 - The same tools exist on a dedicated server as `mc_server_gametest_list` and `mc_server_gametest_run`. See
   [Dedicated servers](/guide/dedicated-server).

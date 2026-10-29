@@ -9,7 +9,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import net.minecraft.client.gui.screens.GenericDirtMessageScreen;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.ProgressScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -71,14 +71,14 @@ public final class StatusMethods {
     /** One of loading, title, joining, in-world. */
     public static String state(Minecraft mc) {
         Screen screen = mc.screen;
-        if (!mc.isGameLoadFinished() || mc.getOverlay() != null) {
+        if (mc.getOverlay() != null) {
             return "loading";
         }
         if (mc.level != null && mc.player != null) {
             return "in-world";
         }
         if (screen instanceof LevelLoadingScreen || screen instanceof ConnectScreen
-                || screen instanceof ProgressScreen || screen instanceof GenericMessageScreen) {
+                || screen instanceof ProgressScreen || screen instanceof GenericDirtMessageScreen) {
             return "joining";
         }
         return "title";

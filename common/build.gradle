@@ -1,10 +1,10 @@
 plugins {
     id 'multiloader-common'
-    id 'net.neoforged.moddev'
+    id 'net.neoforged.moddev.legacyforge'
 }
 
-neoForge {
-    neoFormVersion = neo_form_version
+legacyForge {
+    mcpVersion = mcp_version
     parchment {
         minecraftVersion = parchment_minecraft
         mappingsVersion = parchment_version
@@ -21,9 +21,7 @@ dependencies {
     // If you need to update, check what version they are using to see what is compatible
     // https://github.com/neoforged/NeoForge/blob/26.3.x/gradle.properties#L37
     // https://github.com/FabricMC/fabric-loader/blob/master/gradle.properties#L12
-    compileOnly('net.fabricmc:sponge-mixin:0.15.4+mixin.0.8.7')
-    // Fabric and NeoForge both bundle MixinExtras, so it is safe to use it in common
-    compileOnly(annotationProcessor('io.github.llamalad7:mixinextras-common:0.4.1'))
+    compileOnly('org.spongepowered:mixin:0.8.5')
 
 }
 

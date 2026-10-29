@@ -50,6 +50,23 @@ await check('time.freeze stops the world; time.step advances exactly', async () 
   return `idle +${t1 - t0}, stepped ${s.steppedTicks}`;
 });
 
+// 1.20.1 has no vanilla tick freeze; MCTest's own must also stop mobs (here: a pig falling from the sky).
+await check('time.freeze also stops mobs (pig stays in mid-air until stepped)', async () => {
+  await cmd(`summon minecraft:pig ${X + 0.5} ${Y + 15} ${Z - 4.5} {Tags:["mctest_fall"]}`);
+  await mc.call('time.freeze');
+  const yOf = async () => (await mc.call('entities', { radius: 32, type: 'pig' })).entities.find((e) => e.pos.y > Y + 1)?.pos.y;
+  const y0 = await yOf();
+  await sleep(1000);
+  const y1 = await yOf();
+  await mc.call('time.step', { ticks: 10 });
+  await mc.call('waitFor', { condition: 'ticks:2' }).catch(() => {});
+  const y2 = await yOf();
+  await mc.call('time.unfreeze');
+  await cmd('kill @e[tag=mctest_fall]');
+  assert(y0 !== undefined && y0 === y1 && (y2 === undefined || y2 < y1), `y ${y0} -> ${y1} frozen -> ${y2} after step`);
+  return `y ${y0?.toFixed(2)} frozen, ${y2?.toFixed(2)} after 10 steps`;
+});
+
 await check('lockstep: frozen while idle, runs during actions', async () => {
   await mc.call('time.lockstep', { enabled: true });
   await sleep(300);

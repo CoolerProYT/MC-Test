@@ -1,19 +1,19 @@
 package com.coolerpromc.mctest.platform;
 
 import com.coolerpromc.mctest.platform.services.IPlatformHelper;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.loading.FMLLoader;
-import net.neoforged.fml.loading.FMLPaths;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.loading.FMLLoader;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.nio.file.Path;
 import java.util.List;
 
-public class NeoForgePlatformHelper implements IPlatformHelper {
+public class ForgePlatformHelper implements IPlatformHelper {
 
     @Override
     public String getPlatformName() {
 
-        return "NeoForge";
+        return "Forge";
     }
 
     @Override
@@ -31,7 +31,7 @@ public class NeoForgePlatformHelper implements IPlatformHelper {
     @Override
     public String getLoaderVersion() {
 
-        return ModList.get().getModContainerById("neoforge")
+        return ModList.get().getModContainerById("forge")
                 .map(c -> c.getModInfo().getVersion().toString())
                 .orElse("unknown");
     }

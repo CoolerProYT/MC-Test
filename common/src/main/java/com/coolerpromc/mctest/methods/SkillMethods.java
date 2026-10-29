@@ -21,7 +21,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTickRateManager;
+import com.coolerpromc.mctest.tick.TickControl;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.InteractionHand;
@@ -36,7 +36,7 @@ import net.minecraft.world.inventory.RecipeBookMenu;
 import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -192,7 +192,7 @@ public final class SkillMethods {
 
     private static void setFrozenNow(boolean frozen) {
         MinecraftServer server = server();
-        server.execute(() -> server.tickRateManager().setFrozen(frozen));
+        server.execute(() -> TickControl.get().setFrozen(frozen));
     }
 
     /** Completes once the server has applied the change and the client has had a tick to receive it. */
@@ -200,7 +200,7 @@ public final class SkillMethods {
         lockstep = false;
         MinecraftServer server = server();
         return server.submit(() -> {
-                    server.tickRateManager().setFrozen(frozen);
+                    TickControl.get().setFrozen(frozen);
                     return true;
                 })
                 .thenCompose(v -> ClientThread.callAsync(() -> waitTicks(2)))
@@ -209,7 +209,7 @@ public final class SkillMethods {
 
     private static JsonElement timeStatus() {
         MinecraftServer server = server();
-        ServerTickRateManager trm = server.tickRateManager();
+        TickControl trm = TickControl.get();
         JsonObject out = new JsonObject();
         out.addProperty("frozen", trm.isFrozen());
         out.addProperty("lockstep", lockstep);
@@ -234,14 +234,14 @@ public final class SkillMethods {
             });
             return future;
         }
-        if (!server.tickRateManager().isFrozen()) {
+        if (!TickControl.get().isFrozen()) {
             throw new RpcException("The world is not frozen; call time.freeze first (or use waitFor ticks:n)");
         }
-        server.execute(() -> server.tickRateManager().stepGameIfPaused(ticks));
+        server.execute(() -> TickControl.get().stepGameIfPaused(ticks));
         int[] waited = {0};
         TickScheduler.add(() -> {
             waited[0]++;
-            boolean done = waited[0] > 2 && !server.tickRateManager().isSteppingForward();
+            boolean done = waited[0] > 2 && !TickControl.get().isSteppingForward();
             if (!done && waited[0] < ticks * 3 + 40) return false;
             future.complete(stepResult(server, start));
             return true;
@@ -271,7 +271,7 @@ public final class SkillMethods {
         boolean wantFrozen = !TickScheduler.hasTasks();
         if (lockstepFrozen == null || lockstepFrozen != wantFrozen) {
             lockstepFrozen = wantFrozen;
-            server.execute(() -> server.tickRateManager().setFrozen(wantFrozen));
+            server.execute(() -> TickControl.get().setFrozen(wantFrozen));
         }
     }
 
@@ -365,7 +365,7 @@ public final class SkillMethods {
     static Predicate<BlockState> blockMatcher(String spec) {
         String s = normalizeId(spec);
         if (s.startsWith("#")) {
-            TagKey<Block> tag = TagKey.create(Registries.BLOCK, ResourceLocation.parse(s.substring(1)));
+            TagKey<Block> tag = TagKey.create(Registries.BLOCK, new ResourceLocation(s.substring(1)));
             return state -> state.is(tag);
         }
         return state -> BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(s);
@@ -568,7 +568,7 @@ public final class SkillMethods {
                         + " (mining it would drop nothing); craft or pick up a suitable tool first");
                 return;
             }
-            double reach = p.blockInteractionRange() - 0.4;
+            double reach = blockReach(p) - 0.4;
             Navigator.go(mc, new Navigator.Request(Navigator.withinReach(mc.level, target, reach), target, true, 1200, 20_000))
                     .thenCompose(walk -> {
                         if (!walk.get("arrived").getAsBoolean()) {
@@ -743,7 +743,7 @@ public final class SkillMethods {
                     clamp(eye.y, victim.getBoundingBox().minY, victim.getBoundingBox().maxY),
                     clamp(eye.z, victim.getBoundingBox().minZ, victim.getBoundingBox().maxZ));
             double reachDist = eye.distanceTo(closest);
-            boolean inReach = reachDist <= me.entityInteractionRange() - 0.25;
+            boolean inReach = reachDist <= entityReach(me) - 0.25;
             float yawError = PlayerControl.turnToward(me, aim, true);
 
             if (!inReach) {
@@ -938,7 +938,7 @@ public final class SkillMethods {
         if (selectItem(mc, p, s -> itemId(s).equals(item)) < 0) {
             throw new RpcException("No " + item + " in the inventory");
         }
-        double reach = p.blockInteractionRange() - 0.2;
+        double reach = blockReach(p) - 0.2;
         List<BlockPos> spots = new ArrayList<>();
         if (at != null) {
             spots.add(at);
@@ -1008,10 +1008,10 @@ public final class SkillMethods {
     private static CompletableFuture<JsonElement> craft(String item, int times, boolean keepOpen) {
         Minecraft mc = ClientThread.mc();
         LocalPlayer p = WorldMethods.requirePlayer();
-        List<RecipeHolder<?>> recipes = p.getRecipeBook().getCollections().stream()
+        List<Recipe<?>> recipes = p.getRecipeBook().getCollections().stream()
                 .flatMap(c -> c.getRecipes().stream())
-                .filter(e -> e.value() instanceof CraftingRecipe)
-                .filter(e -> itemId(e.value().getResultItem(mc.level.registryAccess())).equals(item))
+                .filter(e -> e instanceof CraftingRecipe)
+                .filter(e -> itemId(e.getResultItem(mc.level.registryAccess())).equals(item))
                 .distinct()
                 .toList();
         if (recipes.isEmpty()) {
@@ -1020,11 +1020,11 @@ public final class SkillMethods {
         }
         StackedContents contents = new StackedContents();
         p.getInventory().fillStackedContents(contents);
-        RecipeHolder<?> recipe = recipes.stream().filter(e -> contents.canCraft(e.value(), null)).findFirst().orElse(null);
+        Recipe<?> recipe = recipes.stream().filter(e -> contents.canCraft(e, null)).findFirst().orElse(null);
         if (recipe == null) {
             throw new RpcException("Missing ingredients for " + item + " (" + recipes.size() + " recipe(s) known)");
         }
-        boolean big = !recipe.value().canCraftInDimensions(2, 2);
+        boolean big = !recipe.canCraftInDimensions(2, 2);
         Map<String, Integer> before = inventoryCounts(p);
 
         return ensureCraftingMenu(mc, p, big).thenCompose(opened -> {
@@ -1053,7 +1053,7 @@ public final class SkillMethods {
 
     /** Opens the inventory (2x2) or walks to and opens a crafting table (3x3). Completes with "we opened it". */
     private static CompletableFuture<Boolean> ensureCraftingMenu(Minecraft mc, LocalPlayer p, boolean big) {
-        if (mc.screen instanceof AbstractContainerScreen<?> s && s.getMenu() instanceof RecipeBookMenu<?, ?> m
+        if (mc.screen instanceof AbstractContainerScreen<?> s && s.getMenu() instanceof RecipeBookMenu<?> m
                 && m.getGridWidth() >= (big ? 3 : 2)) {
             return CompletableFuture.completedFuture(false);
         }
@@ -1068,7 +1068,7 @@ public final class SkillMethods {
         if (table == null) {
             throw new RpcException("This recipe needs a crafting table: craft one and place it (useOn) first");
         }
-        double reach = p.blockInteractionRange() - 0.4;
+        double reach = blockReach(p) - 0.4;
         CompletableFuture<JsonObject> walk = p.getEyePosition().distanceTo(Vec3.atCenterOf(table)) <= reach
                 ? CompletableFuture.completedFuture(null)
                 : Navigator.go(mc, new Navigator.Request(Navigator.withinReach(mc.level, table, reach), table, true, 1200));
@@ -1099,9 +1099,9 @@ public final class SkillMethods {
     }
 
     /** Click the recipe in the book (server fills the grid), then shift-click the result. */
-    private static CompletableFuture<Boolean> craftOnce(Minecraft mc, RecipeHolder<?> recipe, String item) {
+    private static CompletableFuture<Boolean> craftOnce(Minecraft mc, Recipe<?> recipe, String item) {
         LocalPlayer p = mc.player;
-        if (p == null || !(p.containerMenu instanceof RecipeBookMenu<?, ?> menu)) {
+        if (p == null || !(p.containerMenu instanceof RecipeBookMenu<?> menu)) {
             return CompletableFuture.completedFuture(false);
         }
         mc.gameMode.handlePlaceRecipe(menu.containerId, recipe, false);
@@ -1126,5 +1126,15 @@ public final class SkillMethods {
             return false;
         });
         return done;
+    }
+
+    /** Block reach the server allows (1.20.1 has no reach attributes): 4.5, or 5 in creative. */
+    static double blockReach(LocalPlayer p) {
+        return net.minecraft.client.Minecraft.getInstance().gameMode.getPickRange();
+    }
+
+    /** Entity reach the client allows in 1.20.1: 3 blocks, 6 in creative. */
+    static double entityReach(LocalPlayer p) {
+        return net.minecraft.client.Minecraft.getInstance().gameMode.hasFarPickRange() ? 6.0 : 3.0;
     }
 }

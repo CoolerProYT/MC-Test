@@ -2,11 +2,15 @@
   "required": true,
   "minVersion": "0.8",
   "package": "com.coolerpromc.mctest.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "${mod_id}.refmap.json",
   "mixins": [
     "GameTestInfoAccessor",
     "GameTestTickerMixin",
-    "MinecraftServerTickMixin"
+    "MinecraftServerTickMixin",
+    "ServerLevelTickMixin",
+    "LevelBlockEntityTickMixin",
+    "MobDespawnMixin"
   ],
   "client": [
     "AbstractContainerScreenAccessor",

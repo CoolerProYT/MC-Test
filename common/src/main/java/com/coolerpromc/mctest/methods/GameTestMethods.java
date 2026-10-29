@@ -6,6 +6,7 @@ import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
 import com.coolerpromc.mctest.rpc.RpcRegistry;
 import com.coolerpromc.mctest.util.Describe;
+import com.coolerpromc.mctest.tick.TickControl;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -17,8 +18,6 @@ import net.minecraft.gametest.framework.GameTestRunner;
 import net.minecraft.gametest.framework.GameTestTicker;
 import net.minecraft.gametest.framework.GlobalTestReporter;
 import net.minecraft.gametest.framework.LogTestReporter;
-import net.minecraft.gametest.framework.RetryOptions;
-import net.minecraft.gametest.framework.StructureGridSpawner;
 import net.minecraft.gametest.framework.TestFunction;
 import net.minecraft.gametest.framework.TestReporter;
 import net.minecraft.resources.ResourceLocation;
@@ -58,6 +57,10 @@ public final class GameTestMethods {
     }
 
     public static void setCurrentServer(MinecraftServer server) {
+        if (server != currentServer) {
+            // A new world or server starts unfrozen.
+            com.coolerpromc.mctest.tick.TickControl.get().setFrozen(false);
+        }
         currentServer = server;
     }
 
@@ -113,17 +116,16 @@ public final class GameTestMethods {
         String f = filter == null ? null : filter.toLowerCase(Locale.ROOT);
         JsonArray tests = new JsonArray();
         GameTestRegistry.getAllTestFunctions().stream()
-                .sorted(java.util.Comparator.comparing(TestFunction::testName))
+                .sorted(java.util.Comparator.comparing(TestFunction::getTestName))
                 .forEach(fn -> {
-                    if (f != null && !fn.testName().toLowerCase(Locale.ROOT).contains(f)
-                            && !fn.structureName().toLowerCase(Locale.ROOT).contains(f)) return;
+                    if (f != null && !fn.getTestName().toLowerCase(Locale.ROOT).contains(f)
+                            && !fn.getStructureName().toLowerCase(Locale.ROOT).contains(f)) return;
                     JsonObject t = new JsonObject();
-                    t.addProperty("id", fn.testName());
-                    t.addProperty("batch", fn.batchName());
-                    t.addProperty("structure", fn.structureName());
-                    t.addProperty("maxTicks", fn.maxTicks());
-                    t.addProperty("required", fn.required());
-                    t.addProperty("manualOnly", fn.manualOnly());
+                    t.addProperty("id", fn.getTestName());
+                    t.addProperty("batch", fn.getBatchName());
+                    t.addProperty("structure", fn.getStructureName());
+                    t.addProperty("maxTicks", fn.getMaxTicks());
+                    t.addProperty("required", fn.isRequired());
                     tests.add(t);
                 });
         JsonObject out = new JsonObject();
@@ -135,18 +137,17 @@ public final class GameTestMethods {
     /**
      * Selector: {@code *} (every test), a test name ({@code mytests.place_block}), or a glob over the test name, the
      * structure id ({@code mymod:mytests.place_block}) or {@code <structure namespace>:<test name>}. So {@code mymod:*}
-     * picks the tests whose structures live in {@code mymod}. Manual-only tests only run when named without wildcards.
+     * picks the tests whose structures live in {@code mymod}.
      */
     private static boolean matches(TestFunction fn, String selector) {
         String sel = selector.toLowerCase(Locale.ROOT);
-        String name = fn.testName().toLowerCase(Locale.ROOT);
-        String structure = fn.structureName().toLowerCase(Locale.ROOT);
+        String name = fn.getTestName().toLowerCase(Locale.ROOT);
+        String structure = fn.getStructureName().toLowerCase(Locale.ROOT);
         ResourceLocation id = ResourceLocation.tryParse(structure);
         String namespaced = (id == null ? "minecraft" : id.getNamespace()) + ":" + name;
         if (!sel.contains("*")) {
             return sel.equals(name) || sel.equals(structure) || sel.equals(namespaced);
         }
-        if (fn.manualOnly()) return false;
         if (sel.equals("*") || sel.equals("*:*")) return true;
         Pattern glob = Pattern.compile(("\\Q" + sel + "\\E").replace("*", "\\E.*\\Q"));
         return glob.matcher(name).matches() || glob.matcher(structure).matches() || glob.matcher(namespaced).matches();
@@ -154,7 +155,7 @@ public final class GameTestMethods {
 
     /** Ticks the running GameTests when the game itself does not (anywhere but vanilla's IDE mode). Server thread. */
     public static void tickIfNeeded(MinecraftServer server) {
-        if (SESSIONS.isEmpty() || lastTickerTick == server.getTickCount() || !server.tickRateManager().runsNormally()) return;
+        if (SESSIONS.isEmpty() || lastTickerTick == server.getTickCount() || !TickControl.get().runsNormally()) return;
         GameTestTicker.SINGLETON.tick();
     }
 
@@ -173,13 +174,13 @@ public final class GameTestMethods {
         BlockPos start = new BlockPos(around.getX(), level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, around).getY() + 1, around.getZ() + 3);
 
         List<String> missing = new ArrayList<>();
-        List<GameTestInfo> infos = new ArrayList<>();
+        List<TestFunction> infos = new ArrayList<>();
         for (TestFunction fn : functions) {
-            ResourceLocation structure = ResourceLocation.tryParse(fn.structureName());
+            ResourceLocation structure = ResourceLocation.tryParse(fn.getStructureName());
             if (structure == null || level.getStructureManager().get(structure).isEmpty()) {
-                missing.add(fn.testName() + " (structure " + fn.structureName() + ")");
+                missing.add(fn.getTestName() + " (structure " + fn.getStructureName() + ")");
             } else {
-                infos.add(new GameTestInfo(fn, fn.rotation(), level, RetryOptions.noRetries()));
+                infos.add(fn);
             }
         }
         if (infos.isEmpty()) {
@@ -194,10 +195,7 @@ public final class GameTestMethods {
         GameTestTicker.SINGLETON.clear(); // what /test does first: stops a previous run
         GameTestRunner.clearMarkers(level);
         GameTestRegistry.forgetFailedTests();
-        GameTestRunner.Builder.fromInfo(infos, level)
-                .newStructureSpawner(new StructureGridSpawner(start, 8, false))
-                .build()
-                .start();
+        GameTestRunner.runTests(infos, start, net.minecraft.world.level.block.Rotation.NONE, level, GameTestTicker.SINGLETON, 8);
 
         session.checkDone();
         return session.future

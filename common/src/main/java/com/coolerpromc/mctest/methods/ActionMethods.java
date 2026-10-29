@@ -439,7 +439,7 @@ public final class ActionMethods {
         List<String> lines = new ArrayList<>();
         if (!stack.isEmpty()) {
             TooltipFlag flag = advanced ? TooltipFlag.ADVANCED : TooltipFlag.NORMAL;
-            for (Component c : stack.getTooltipLines(net.minecraft.world.item.Item.TooltipContext.of(mc.level), p, flag)) {
+            for (Component c : stack.getTooltipLines(p, flag)) {
                 lines.add(c.getString());
             }
         }

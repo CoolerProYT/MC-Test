@@ -75,10 +75,14 @@ public final class ScreenInspector {
         boolean active = !(listener instanceof AbstractWidget w) || w.isActive();
         boolean visible = (!(listener instanceof AbstractWidget w) || w.visible)
                 && layout.getWidth() > 0 && layout.getHeight() > 0
-                && clip.containsPoint(layout.getX() + layout.getWidth() / 2, layout.getY() + layout.getHeight() / 2);
+                && contains(clip, layout.getX() + layout.getWidth() / 2, layout.getY() + layout.getHeight() / 2);
         String id = index + ":" + className + ":" + idText(text);
         return new Element(id, listener, listEntry ? "entry" : type(listener), listener.getClass().getName(), text,
                 layout.getX(), layout.getY(), layout.getWidth(), layout.getHeight(), active, listener.isFocused(), visible);
+    }
+
+    private static boolean contains(ScreenRectangle r, int x, int y) {
+        return x >= r.left() && x < r.right() && y >= r.top() && y < r.bottom();
     }
 
     /** Anonymous/lambda classes have no simple name; use the nearest named superclass. */
@@ -131,7 +135,7 @@ public final class ScreenInspector {
         }
         String wanted = withoutIndex(id);
         List<Element> matches = all.stream().filter(e -> withoutIndex(e.id()).equals(wanted)).toList();
-        return matches.size() == 1 ? matches.getFirst() : null;
+        return matches.size() == 1 ? matches.get(0) : null;
     }
 
     private static String withoutIndex(String id) {

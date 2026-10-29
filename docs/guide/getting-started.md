@@ -2,7 +2,7 @@
 
 MCTest has two parts:
 
-- **The MCTest mod**, a dev-only client mod for Fabric and NeoForge. It opens a WebSocket JSON-RPC API on
+- **The MCTest mod**, a dev-only client mod for Fabric and Forge. It opens a WebSocket JSON-RPC API on
   `127.0.0.1:25599` inside your dev client.
 - **The MCP server** [`mctest-mcp`](https://www.npmjs.com/package/mctest-mcp), which turns that API into `mc_*` tools
   for Claude Code or any other MCP client.
@@ -14,7 +14,7 @@ Claude Code ──stdio/MCP──▶ mctest-mcp (Node) ──WebSocket JSON-RPC�
 ## 1. Add the mod to your mod's dev runtime
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-fabric-1.21.1:<version>` and `com.coolerpromc.mctest:mctest-neoforge-1.21.1:<version>`.
+`com.coolerpromc.mctest:mctest-fabric-1.20.1:<version>` and `com.coolerpromc.mctest:mctest-forge-1.20.1:<version>`.
 
 Latest releases (updated automatically from the Maven repository; use the one for your Minecraft version):
 
@@ -35,24 +35,41 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    // 1.21.1 is obfuscated: modLocalRuntime remaps MCTest to your mappings.
-    modLocalRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:1.21.1.1") { transitive = false }
+    // 1.20.1 is obfuscated: modLocalRuntime remaps MCTest to your mappings.
+    modLocalRuntime("com.coolerpromc.mctest:mctest-fabric-${minecraft_version}:1.20.1.1") { transitive = false }
 }
 ```
 
-```groovy [NeoForge (neoforge/build.gradle)]
+```groovy [Forge, ForgeGradle 6 (forge/build.gradle)]
 repositories {
     maven { url = 'https://maven.coolerpromc.com/releases/' }
 }
 
-// ModDevGradle has no built-in localRuntime, so declare one. Runtime-only in dev, never published.
-configurations {
-    localRuntime
-    runtimeClasspath.extendsFrom localRuntime
+dependencies {
+    // Dev-only: deobfuscated for runClient/runServer, never in your jar or POM.
+    runtimeOnly(fg.deobf("com.coolerpromc.mctest:mctest-forge-${minecraft_version}:1.20.1.1")) { transitive = false }
+}
+
+minecraft {
+    runs {
+        configureEach {
+            // Needed for mixins from obfuscated mod jars (MCTest's). The 1.20.1 MDK leaves these out; without them
+            // the game stops at startup with "Mixin apply failed".
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+        }
+    }
+}
+```
+
+```groovy [Forge, ModDevGradle legacyforge (forge/build.gradle)]
+repositories {
+    maven { url = 'https://maven.coolerpromc.com/releases/' }
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-${minecraft_version}:1.21.1.1") { transitive = false }
+    // ModDevGradle deobfuscates mod dependencies and sets up the mixin remapping itself.
+    modRuntimeOnly("com.coolerpromc.mctest:mctest-forge-${minecraft_version}:1.20.1.1") { transitive = false }
 }
 ```
 
@@ -98,7 +115,7 @@ The server connects lazily and reconnects after the game restarts, so register i
 ## 3. Start the game
 
 ```bash
-./gradlew :fabric:runClient     # or :neoforge:runClient
+./gradlew :fabric:runClient     # or :forge:runClient
 ```
 
 Then ask your agent to test something. It starts with `mc_wait_ready`. Continue with [Your first test](/guide/first-test).

@@ -22,7 +22,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTickRateManager;
+import com.coolerpromc.mctest.tick.TickControl;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -92,11 +92,11 @@ public final class ServerMethods {
         });
         RpcRegistry.register("time.status", params -> ServerThread.call(ServerMethods::timeStatus));
         RpcRegistry.register("time.freeze", params -> ServerThread.call(() -> {
-            ServerThread.server().tickRateManager().setFrozen(true);
+            TickControl.get().setFrozen(true);
             return timeStatus();
         }));
         RpcRegistry.register("time.unfreeze", params -> ServerThread.call(() -> {
-            ServerThread.server().tickRateManager().setFrozen(false);
+            TickControl.get().setFrozen(false);
             return timeStatus();
         }));
         RpcRegistry.register("time.step", params -> {
@@ -133,8 +133,8 @@ public final class ServerMethods {
             out.addProperty("motd", server.getMotd());
             out.addProperty("onlineMode", server.usesAuthentication());
             out.addProperty("tickCount", server.getTickCount());
-            out.addProperty("msPerTick", server.getCurrentSmoothedTickTime());
-            out.addProperty("frozen", server.tickRateManager().isFrozen());
+            out.addProperty("msPerTick", server.getAverageTickTime());
+            out.addProperty("frozen", TickControl.get().isFrozen());
             out.addProperty("maxPlayers", server.getPlayerList().getMaxPlayers());
             JsonArray players = new JsonArray();
             server.getPlayerList().getPlayers().forEach(p -> players.add(p.getGameProfile().getName()));
@@ -181,7 +181,7 @@ public final class ServerMethods {
         int[] result = {0};
         CommandSourceStack source = server.createCommandSourceStack()
                 .withSource(sink)
-                .withCallback((ok, value) -> {
+                .withCallback((context, ok, value) -> {
                     success[0] = ok;
                     result[0] = value;
                 });
@@ -232,7 +232,7 @@ public final class ServerMethods {
         out.addProperty("uuid", p.getUUID().toString());
         out.addProperty("entityId", p.getId());
         out.addProperty("op", server.getPlayerList().isOp(p.getGameProfile()));
-        out.addProperty("ping", p.connection == null ? null : p.connection.latency());
+        out.addProperty("ping", p.latency);
         out.add("pos", Describe.vec(p.position()));
         out.add("blockPos", Describe.pos(p.blockPosition()));
         out.addProperty("yaw", p.getYRot());
@@ -263,7 +263,7 @@ public final class ServerMethods {
         JsonArray effects = new JsonArray();
         for (MobEffectInstance e : p.getActiveEffects()) {
             JsonObject o = new JsonObject();
-            o.addProperty("id", e.getEffect().getRegisteredName());
+            o.addProperty("id", String.valueOf(BuiltInRegistries.MOB_EFFECT.getKey(e.getEffect())));
             o.addProperty("amplifier", e.getAmplifier());
             o.addProperty("duration", e.isInfiniteDuration() ? -1 : e.getDuration());
             effects.add(o);
@@ -447,7 +447,7 @@ public final class ServerMethods {
 
     private static JsonObject timeStatus() {
         MinecraftServer server = ServerThread.server();
-        ServerTickRateManager trm = server.tickRateManager();
+        TickControl trm = TickControl.get();
         JsonObject out = new JsonObject();
         out.addProperty("frozen", trm.isFrozen());
         out.addProperty("stepping", trm.isSteppingForward());
@@ -458,7 +458,7 @@ public final class ServerMethods {
 
     private static CompletableFuture<JsonElement> step(int ticks) {
         MinecraftServer server = ServerThread.server();
-        ServerTickRateManager trm = server.tickRateManager();
+        TickControl trm = TickControl.get();
         if (!trm.isFrozen()) {
             throw new RpcException("The server is not frozen; call time.freeze first (or use waitFor ticks:n)");
         }

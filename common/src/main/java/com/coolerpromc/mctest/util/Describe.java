@@ -5,8 +5,7 @@ import com.coolerpromc.mctest.platform.services.IPlatformHelper;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponentPatch;
-import net.minecraft.core.component.TypedDataComponent;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
@@ -76,23 +75,18 @@ public final class Describe {
             o.addProperty("damage", item.getDamageValue());
             o.addProperty("maxDamage", item.getMaxDamage());
         }
-        DataComponentPatch patch = item.getComponentsPatch();
-        if (!patch.isEmpty()) {
-            DataComponentPatch.SplitResult split = patch.split();
+        // 1.20.1 has no data components: "components" lists the stack's NBT tags instead (Damage, Enchantments, ...).
+        CompoundTag tag = item.getTag();
+        if (tag != null && !tag.isEmpty()) {
             JsonObject components = new JsonObject();
-            for (TypedDataComponent<?> c : split.added()) {
-                String value = String.valueOf(c.value());
+            for (String key : tag.getAllKeys()) {
+                String value = String.valueOf(tag.get(key));
                 if (value.length() > COMPONENT_VALUE_LIMIT) {
                     value = value.substring(0, COMPONENT_VALUE_LIMIT) + "...";
                 }
-                components.addProperty(String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(c.type())), value);
+                components.addProperty(key, value);
             }
             o.add("components", components);
-            if (!split.removed().isEmpty()) {
-                JsonArray removed = new JsonArray();
-                split.removed().forEach(t -> removed.add(String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(t))));
-                o.add("removedComponents", removed);
-            }
         }
         return o;
     }
@@ -113,7 +107,7 @@ public final class Describe {
         if (be != null) {
             JsonObject b = new JsonObject();
             b.addProperty("type", String.valueOf(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType())));
-            b.addProperty("nbt", be.saveWithFullMetadata(level.registryAccess()).toString());
+            b.addProperty("nbt", be.saveWithFullMetadata().toString());
             out.add("blockEntity", b);
         } else {
             out.add("blockEntity", null);

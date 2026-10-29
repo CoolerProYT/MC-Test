@@ -8,7 +8,7 @@ crashes, the next call fails with a hint to use `mc_crash_report`.
 
 ## Logs from before MCTest loads
 
-On Fabric MCTest attaches in `preLaunch`, before any mod initializes. On NeoForge, lines logged before MCTest is
+On Fabric MCTest attaches in `preLaunch`, before any mod initializes. On Forge, lines logged before MCTest is
 constructed are imported from `logs/latest.log` (flagged `backfilled: true`), so your mod's startup errors are visible
 on both loaders.
 
@@ -28,7 +28,17 @@ screen class). `screen:` in `mc_wait_for` also matches superclasses, for example
 
 `mc_key {key: "e"}` returns before the inventory opens. Follow it with `mc_wait_for {condition: "screen:InventoryScreen"}`.
 
-## Input is GLFW in 1.21.1
+## Freezing time is MCTest's own on 1.20.1
+
+Vanilla only has `/tick` from 1.20.3, so `mc_time_freeze`, `mc_time_step` and `mc_lockstep` use MCTest's own freeze.
+Chunks keep loading and players keep moving; time, weather, block ticks, block entities and other entities stop.
+
+## Item details use NBT on 1.20.1
+
+The `components` of an item stack list its NBT tags (`Damage`, `Enchantments`, `display`), since data components only
+exist from 1.20.5.
+
+## Input is GLFW in 1.20.1
 
 Raw key numbers for `mc_key` are GLFW key codes (26.3 and newer use SDL scancodes). Use names (`e`, `escape`, `left_shift`, `f3`).
 

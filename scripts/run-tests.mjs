@@ -1,9 +1,9 @@
 // One command for the whole suite: builds and launches the game (and a dedicated server), waits until ready, runs the
 // test scripts, then quits the game cleanly. Exit code 1 if anything failed.
 //
-//   node scripts/run-tests.mjs                     # fabric + neoforge, default suites, including the server suite
+//   node scripts/run-tests.mjs                     # fabric + forge, default suites, including the server suite
 //   node scripts/run-tests.mjs fabric              # one loader
-//   node scripts/run-tests.mjs neoforge --no-server
+//   node scripts/run-tests.mjs forge --no-server
 //   node scripts/run-tests.mjs fabric --suites step4,mcp
 //
 // Suites: ws, step4, step5, play, skills, mcp, server. Not run by default: survival (terrain-dependent, slow) and
@@ -26,7 +26,7 @@ function run(cmd, cmdArgs, options) {
 }
 
 const args = process.argv.slice(2);
-const loaders = args.filter((a) => a === 'fabric' || a === 'neoforge');
+const loaders = args.filter((a) => a === 'fabric' || a === 'forge');
 const suitesArg = args.includes('--suites') ? args[args.indexOf('--suites') + 1].split(',') : null;
 const ALL = ['ws', 'step4', 'step5', 'play', 'skills', 'mcp', 'server'];
 const suites = (suitesArg ?? ALL).filter((s) => !(args.includes('--no-server') && s === 'server'));
@@ -129,7 +129,7 @@ function runSuite(name, loader) {
 }
 
 const results = [];
-for (const loader of loaders.length ? loaders : ['fabric', 'neoforge']) {
+for (const loader of loaders.length ? loaders : ['fabric', 'forge']) {
   console.log(`\n== ${loader} ==`);
   const needServer = suites.includes('server');
   const server = needServer ? launch(`${loader}-server`, `:${loader}:runServer`) : null;

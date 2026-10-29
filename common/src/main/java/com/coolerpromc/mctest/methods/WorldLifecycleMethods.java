@@ -21,7 +21,7 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import net.minecraft.client.gui.screens.GenericDirtMessageScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.core.registries.Registries;
@@ -140,7 +140,7 @@ public final class WorldLifecycleMethods {
         // Run outside this task so the request is acknowledged before the (blocking) load starts.
         mc.execute(() -> {
             leaveIfInWorld(mc);
-            mc.createWorldOpenFlows().createFreshLevel(folder, settings, options, dimensions, new TitleScreen());
+            mc.createWorldOpenFlows().createFreshLevel(folder, settings, options, dimensions);
         });
 
         JsonObject out = new JsonObject();
@@ -157,7 +157,7 @@ public final class WorldLifecycleMethods {
         Minecraft mc = ClientThread.mc();
         mc.execute(() -> {
             leaveIfInWorld(mc);
-            mc.createWorldOpenFlows().openWorld(levelId, () -> mc.setScreen(new TitleScreen()));
+            mc.createWorldOpenFlows().loadLevel(new TitleScreen(), levelId);
         });
         JsonObject out = new JsonObject();
         out.addProperty("levelId", levelId);
@@ -173,7 +173,7 @@ public final class WorldLifecycleMethods {
         mc.execute(() -> {
             leaveIfInWorld(mc);
             ConnectScreen.startConnecting(new JoinMultiplayerScreen(new TitleScreen()), mc, parsed,
-                    new ServerData("MCTest", address, ServerData.Type.OTHER), false, null);
+                    new ServerData("MCTest", address, false), false);
         });
         JsonObject out = new JsonObject();
         out.addProperty("address", parsed.getHost() + ":" + parsed.getPort());
@@ -236,7 +236,7 @@ public final class WorldLifecycleMethods {
                 // Went loading -> back to a menu without entering the world.
                 if (screen instanceof DisconnectedScreenAccessor disconnected) {
                     future.completeExceptionally(new RpcException("Disconnected: " + screen.getTitle().getString()
-                            + ": " + disconnected.mctest$getDetails().reason().getString()));
+                            + ": " + disconnected.mctest$getReason().getString()));
                     return true;
                 }
                 future.completeExceptionally(new RpcException("World did not load; client is on " + describe(screen)
@@ -304,13 +304,13 @@ public final class WorldLifecycleMethods {
     /** Same as the pause menu's "Save and Quit to Title" (saves and stops the integrated server) or "Disconnect". */
     private static void leaveIfInWorld(Minecraft mc) {
         if (mc.level != null) {
-            // What the pause menu's button does in 1.21.1.
+            // What the pause menu's button does in 1.20.1.
             boolean local = mc.isLocalServer();
             mc.level.disconnect();
             if (local) {
-                mc.disconnect(new GenericMessageScreen(Component.translatable("menu.savingLevel")));
+                mc.clearLevel(new GenericDirtMessageScreen(Component.translatable("menu.savingLevel")));
             } else {
-                mc.disconnect();
+                mc.clearLevel();
             }
             mc.setScreen(new TitleScreen());
         }
@@ -362,7 +362,7 @@ public final class WorldLifecycleMethods {
                 w.addProperty("levelId", s.getLevelId());
                 w.addProperty("name", s.getLevelName());
                 w.addProperty("gamemode", s.isHardcore() ? "hardcore" : s.getGameMode().getName());
-                w.addProperty("cheats", s.hasCommands());
+                w.addProperty("cheats", s.hasCheats());
                 w.addProperty("lastPlayed", s.getLastPlayed());
                 w.addProperty("locked", s.isLocked());
                 worlds.add(w);
@@ -385,7 +385,7 @@ public final class WorldLifecycleMethods {
             }
             List<LevelSummary> byName = list.stream().filter(s -> s.getLevelName().equals(name)).toList();
             if (byName.size() == 1) {
-                return byName.getFirst().getLevelId();
+                return byName.get(0).getLevelId();
             }
             if (byName.size() > 1) {
                 throw new RpcException("Several worlds are named '" + name + "'; use the levelId: "

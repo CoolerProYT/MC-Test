@@ -1,7 +1,7 @@
 // Dedicated-server checks: server control API, client connect, client/server views agree, chat and commands from a
 // dev client, server-side waits and time control. Start a server and a client first:
-//   ./gradlew :fabric:runServer   (or :neoforge:runServer)
-//   ./gradlew :fabric:runClient   (or :neoforge:runClient)
+//   ./gradlew :fabric:runServer   (or :forge:runServer)
+//   ./gradlew :fabric:runClient   (or :forge:runClient)
 //   node scripts/server-test.mjs [host:port]
 import { connect, harness } from './lib.mjs';
 
@@ -94,7 +94,7 @@ const { x, y, z } = me.blockPos;
 const chest = { x: x + 2, y, z };
 await check('server setblock -> client sees it', async () => {
   const r = await srv.call('command', {
-    command: `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest{Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}`,
+    command: `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest{Items:[{Slot:0b,id:"minecraft:diamond",Count:3b}]}`,
   });
   assert(r.success, JSON.stringify(r.output));
   const w = await mc.call('waitFor', { condition: `block:${chest.x},${chest.y},${chest.z}=chest` });
