@@ -30,7 +30,7 @@ screen class). `screen:` in `mc_wait_for` also matches superclasses, for example
 
 ## Input is SDL3 from 26.3
 
-Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 26.1.2 and 26.2. Use names (`e`, `escape`, `left_shift`, `f3`).
+Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 1.21.1, 26.1.2 and 26.2. Use names (`e`, `escape`, `left_shift`, `f3`).
 
 ## Pause on lost focus is off
 

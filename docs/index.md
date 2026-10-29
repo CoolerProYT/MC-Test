@@ -4,7 +4,7 @@ layout: home
 hero:
   name: MCTest
   text: Playwright for Minecraft
-  tagline: Let Claude Code, or any MCP client, drive a running Minecraft client and test your mod. Dev-only, for Minecraft 26.1.2, 26.2 and 26.3 on Fabric and NeoForge.
+  tagline: Let Claude Code, or any MCP client, drive a running Minecraft client and test your mod. Dev-only, for Minecraft 1.21.1, 26.1.2, 26.2 and 26.3 on Fabric and NeoForge.
   image:
     src: /logo.svg
     alt: MCTest

@@ -1,6 +1,6 @@
 # MCTest
 
-A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 26.1.2, 26.2 and 26.3) plus an **MCP server**, so Claude Code (or any
+A **dev-only** Minecraft client mod (Fabric + NeoForge, Minecraft 1.21.1, 26.1.2, 26.2 and 26.3) plus an **MCP server**, so Claude Code (or any
 coding agent, or your own scripts) can drive a running Minecraft client the way Playwright drives a browser: open
 worlds, click GUIs, press keys, walk, mine, place, craft, fight, run commands, inspect blocks, entities and inventories,
 read logs and take screenshots. The main use is testing your own mods.
@@ -25,7 +25,7 @@ Claude Code ──stdio/MCP──▶ mcp/ (Node) ──WebSocket JSON-RPC──�
 ### Where to get it
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 26.1.2, 26.2 and 26.3.
+`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 1.21.1, 26.1.2, 26.2 and 26.3.
 The snippets below use that repository. If you're changing MCTest itself, run `./gradlew publishToMavenLocal` and use
 `mavenLocal()` instead to pick up your local build.
 
@@ -56,7 +56,7 @@ dependencies {
 ```
 
 `localRuntime` is Loom's dev-runtime configuration. `transitive = false` stops MCTest's own `fabric-api` /
-`fabric-loader` runtime dependencies from overriding your versions.
+`fabric-loader` runtime dependencies from overriding your versions. On 1.21.1, depend on it with `modLocalRuntime` instead of `localRuntime`: 1.21.1 is obfuscated, so Loom has to remap MCTest.
 
 ### NeoForge (ModDevGradle), in your mod's `neoforge/build.gradle`
 
@@ -309,7 +309,7 @@ of a hole with no exposed stone), which is where pathfinding that can place bloc
   mod's startup errors are visible on both loaders.
 - **Tutorial hints are skipped.** Toasts like "Look around" would otherwise cover screenshots. Use
   `-Dmctest.tutorial=true` to keep them.
-- **Input is SDL3 from 26.3.** Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 26.1.2/26.2.
+- **Input is SDL3 from 26.3.** Raw key numbers for `mc_key` are SDL scancodes on 26.3 and GLFW key codes on 1.21.1, 26.1.2 and 26.2.
   Use names, which work on every version.
 - **Your mouse is left alone.** Vanilla captures the OS cursor whenever a screen closes in-world and warps it to the
   window centre whenever one opens, so an agent opening and closing screens or entering worlds would keep trapping or
@@ -385,7 +385,7 @@ node scripts/server-test.mjs          # dedicated server: also start ./gradlew :
 cd mcp && npm test                    # MCP server end to end over stdio
 ```
 
-All of these pass on both Fabric and NeoForge for 26.3 (and for 26.2 and 26.1.2 on their branches). `survival-test` depends on the terrain around the spawn
+All of these pass on both Fabric and NeoForge for 26.3 (and for 26.2, 26.1.2 and 1.21.1 on their branches). `survival-test` depends on the terrain around the spawn
 point and passes on most seeds (see above).
 
 ## License

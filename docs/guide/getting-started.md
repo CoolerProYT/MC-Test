@@ -14,7 +14,7 @@ Claude Code ──stdio/MCP──▶ mctest-mcp (Node) ──WebSocket JSON-RPC�
 ## 1. Add the mod to your mod's dev runtime
 
 MCTest is published to `https://maven.coolerpromc.com/releases/` as
-`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 26.1.2, 26.2 and 26.3.
+`com.coolerpromc.mctest:mctest-<loader>-<minecraft version>:<version>`, for Minecraft 1.21.1, 26.1.2, 26.2 and 26.3.
 
 Latest releases, updated automatically from the Maven repository. Pick the row for your Minecraft version:
 
@@ -28,6 +28,9 @@ Latest releases, updated automatically from the Maven repository. Pick the row f
 
 The snippets below are for 26.3. For another Minecraft version, replace the artifact and version with the
 ones from its row (for example `mctest-fabric-26.1.2:26.1.2.1`).
+
+On **1.21.1** Fabric, depend on it with `modLocalRuntime` instead of `localRuntime`: 1.21.1 is obfuscated, so
+Loom has to remap MCTest to your mappings. NeoForge uses `localRuntime` on every version.
 
 ::: code-group
 
