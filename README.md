@@ -34,13 +34,13 @@ Latest releases, updated automatically from the Maven repository. Pick the row f
 <!-- mctest-versions:start -->
 | Minecraft | Fabric | NeoForge |
 |---|---|---|
-| 26.3 | `mctest-fabric-26.3:26.3.0.3` | `mctest-neoforge-26.3:26.3.0.3` |
-| 26.2 | `mctest-fabric-26.2:26.2.0.1` | `mctest-neoforge-26.2:26.2.0.1` |
-| 26.1.2 | `mctest-fabric-26.1.2:26.1.2.1` | `mctest-neoforge-26.1.2:26.1.2.1` |
+| 26.3 | `mctest-fabric-26.3:26.3.0.4` | `mctest-neoforge-26.3:26.3.0.4` |
+| 26.2 | `mctest-fabric-26.2:26.2.0.2` | `mctest-neoforge-26.2:26.2.0.2` |
+| 26.1.2 | `mctest-fabric-26.1.2:26.1.2.2` | `mctest-neoforge-26.1.2:26.1.2.2` |
 <!-- mctest-versions:end -->
 
 The snippets below are for 26.3. For another Minecraft version, replace the artifact and version with the
-ones from its row (for example `mctest-fabric-26.1.2:26.1.2.1`).
+ones from its row (for example `mctest-fabric-26.1.2:26.1.2.2`).
 
 ### Fabric (Loom), in your mod's `fabric/build.gradle`
 
@@ -51,7 +51,7 @@ repositories {
 
 dependencies {
     // Dev-only: on the runClient classpath, never in your jar or POM.
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.3") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.4") { transitive = false }
 }
 ```
 
@@ -74,7 +74,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.3") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.4") { transitive = false }
 }
 ```
 
