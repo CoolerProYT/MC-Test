@@ -195,6 +195,15 @@ In a development environment MCTest makes a dev server usable by dev clients:
 - **Auto-op.** Players are opped when they join, so `mc_command` works from the client. A test that deops a player is
   respected until they rejoin. Turn off with `-Dmctest.autoOp=false` (for permission tests).
 
+**Several players.** `mc_launch {loader, name: "Bob"}` starts another client that plays as Bob, on its own control
+port; every client tool takes `client: "Bob"` (or `port`) to drive it, `mc_clients` lists the running clients and
+`mc_close_all` closes all of them. Clients started another way take the name from `-Dmctest.username` (or
+`MCTEST_USERNAME`) and the port from `-Dmctest.port` (or `MCTEST_PORT`).
+
+**Freezing the whole server.** `mc_server_time_freeze {full: true}` (and `mc_time_freeze {full: true}` in
+singleplayer) pauses the whole server tick, not just the worlds: players and every mod's tick events stop too, so mod
+timers and countdowns hold still. Clients stay connected; `*_time_step {ticks}` runs exact whole server ticks.
+
 The server API has no singleplayer equivalent and is not started in the integrated server: in singleplayer the client
 API already reads the integrated server directly (`mc_block`, `mc_time_*`).
 
@@ -237,7 +246,7 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_close_screen` | `closeScreen` | Close the current screen |
 | `mc_command` | `command {command,ticks?}` | Run a command, return the chat output from the next few ticks |
 | `mc_chat` | `chat {message}` | Send a chat message |
-| `mc_player` | `player` | Position, rotation, dimension, gamemode, health, food, xp, crosshair target, inventory, effects, attributes |
+| `mc_player` | `player` | Position, rotation, dimension, gamemode, health, food, xp, gliding, vehicle, passengers, fire ticks, air, freeze ticks, water/lava, crosshair target, inventory, effects, attributes |
 | `mc_block` | `block {x,y,z,source?}` | Block id, state properties, block-entity NBT (from the integrated server in singleplayer) |
 | `mc_entities` | `entities {radius?,type?,limit?}` | Nearby entities with ids, types, names, health, item stacks |
 | `mc_teleport` | `teleport {x,y,z,yaw?,pitch?}` | `/tp` and wait until arrived |
@@ -259,14 +268,15 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (shown in brack
 | `mc_world_leave` | `world.leave` | Save and quit to title, or disconnect from a server |
 | `mc_connect` | `connect {address?}` | Join a multiplayer server and wait until in-world; fails with the disconnect reason |
 | `mc_quit` | `quit` | Quit the game cleanly (saves first), e.g. to restart after rebuilding your mod |
-| `mc_launch` | (runs gradle) | Start `./gradlew :<loader>:runClient` and track it; then `mc_wait_ready` |
-| `mc_close_all` | `quit` / `stop`, then kill | Close every client and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
+| `mc_launch` | (runs gradle) | Start `./gradlew :<loader>:runClient` and track it; then `mc_wait_ready`. `name` (e.g. `"Bob"`) starts an extra client as that player on its own control port |
+| `mc_clients` | `status` per port | List the running MCTest clients (player name, control port, state, pid) |
+| `mc_close_all` | `quit` / `stop`, then kill | Close every client (extra named clients too) and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
 | `mc_crash_report` | (reads files) | Newest crash report or JVM `hs_err` log of the client or server, also after the game has died |
 | `mc_gametest_list` | `gametest.list {filter?}` | GameTests registered in the singleplayer world (vanilla, your mod's, datapack test instances) |
 | `mc_gametest_run` | `gametest.run {tests?,timeoutSeconds?}` | Run GameTests (`/test run <selector>`) and wait: pass/fail per test with the failure message and position, plus an overall `success` |
 | `mc_world_list` | `world.list` | Worlds in the saves folder |
 | `mc_world_delete` | `world.delete {name}` | Delete a world (not the open one) |
-| `mc_time_freeze` / `mc_time_unfreeze` | `time.freeze` / `time.unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act |
+| `mc_time_freeze` / `mc_time_unfreeze` | `time.freeze` / `time.unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act. `full: true` pauses the whole server tick instead, mod tick events and timers included |
 | `mc_time_step` | `time.step {ticks}` | Advance a frozen world by exactly N ticks |
 | `mc_lockstep` | `time.lockstep {enabled}` | The world only runs while an MCTest action is in progress, so nothing happens while the agent is thinking |
 | `mc_time_status` | `time.status` | Frozen / lockstep state and game time |
@@ -287,12 +297,12 @@ Dedicated-server tools (the server's own API, port 25598):
 | `mc_server_wait_ready` | (polls `status`) | Wait until the server has started; tolerates it not running yet |
 | `mc_server_status` | `status` | State (`starting`/`running`/`stopping`), game port, online mode, players, ms/tick, frozen, dimensions, mods |
 | `mc_server_command` | `command {command,ticks?}` | Run a command as the console (full permissions); returns output, success, result |
-| `mc_server_players` | `players` | Players as the server sees them: op, ping, position, dimension, gamemode, health, inventory, open menu, effects |
+| `mc_server_players` | `players` | Players as the server sees them: op, ping, position, dimension, gamemode, health, gliding, vehicle, fire ticks, air, freeze ticks, inventory, open menu, effects |
 | `mc_server_block` | `block {x,y,z,dimension?}` | Authoritative block state and block-entity NBT |
 | `mc_server_entities` | `entities {player? \| x,y,z?, dimension?, radius?, type?, limit?}` | Entities around a player or point, or all loaded in a dimension |
 | `mc_server_wait_for` | `waitFor {condition,timeoutTicks?}` | `ticks:<n>`, `log:<text>`, `player:<name>`, `noplayer:<name>`, `players:<n>`, `block:<x,y,z>=<id>[@dim]`, `entity:<type>[@dim]` |
 | `mc_server_logs` | `logs {…}` | The server's captured log lines, same format as `mc_logs` |
-| `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status` | `time.*` | Tick freeze and exact stepping on the server |
+| `mc_server_time_freeze` / `_unfreeze` / `_step` / `_status` | `time.*` | Tick freeze and exact stepping on the server; `full: true` pauses the whole server tick (mod tick events and timers too) |
 | `mc_server_gametest_list` / `_run` | `gametest.*` | The GameTest tools, on the dedicated server |
 | `mc_server_stop` | `stop` | Save and stop the server |
 | `mc_server_launch` | (runs gradle) | Start `./gradlew :<loader>:runServer` and track it; then `mc_server_wait_ready`. `mc_close_all` closes it |
@@ -423,6 +433,7 @@ node scripts/survival-test.mjs [seed] # no-cheats run on real terrain: punch tre
 node scripts/cursor-test.mjs          # screens open/close without the game capturing your mouse (Windows)
 node scripts/server-test.mjs          # dedicated server: also start ./gradlew :<loader>:runServer first
 cd mcp && npm test                    # MCP server end to end over stdio
+cd mcp && node test-multiplayer.mjs fabric 25566   # server + two clients, client targeting, full freeze
 ```
 
 All of these pass on both Fabric and NeoForge for 26.3 (and for 26.2, 26.1.2 and 1.21.1 on their branches, and on Fabric and Forge for 1.20.1). `survival-test` depends on the terrain around the spawn

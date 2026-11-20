@@ -16,6 +16,10 @@ export type Side = 'client' | 'server';
 
 export interface Launched {
   side: Side;
+  /** Control port of the game's MCTest API. */
+  port: number;
+  /** Player name requested for a client (mc_launch name). */
+  name?: string;
   loader: string;
   task: string;
   projectDir: string;
@@ -103,42 +107,90 @@ function findGameJvms(projectDir: string, since: number): number[] {
     .map((r) => r.pid);
 }
 
+/** Ports probed for MCTest clients that were not launched by this session (mc_clients, mc_close_all). */
+export const CLIENT_PORT_SCAN = { from: 25599, to: 25619 };
+
+export interface LaunchOptions {
+  /** Control port; default: the side's default port. */
+  port?: number;
+  /** Player name for a client (sets mctest.username). */
+  name?: string;
+}
+
 export class Launcher {
   readonly launched: Launched[] = [];
 
-  constructor(private readonly clients: Record<Side, MCTestClient>) {}
+  /**
+   * @param clientFor the API client of a side's game on a port
+   * @param defaultPort the port each side uses when none is given
+   */
+  constructor(
+    private readonly clientFor: (side: Side, port: number) => MCTestClient,
+    private readonly defaultPort: Record<Side, number>,
+  ) {}
+
+  /** Live games this session launched. */
+  running(side?: Side): Launched[] {
+    return this.launched.filter((l) => (!side || l.side === side) && (!l.exited || isAlive(l.gamePid)));
+  }
 
   /** Starts `gradlew :<loader>:runClient|runServer` (or a custom task) in the project directory. */
-  async launch(side: Side, loader: string, projectDir: string | undefined, task: string | undefined, args: string[]): Promise<Launched> {
+  async launch(side: Side, loader: string, projectDir: string | undefined, task: string | undefined, args: string[], opts: LaunchOptions = {}): Promise<Launched> {
     const dir = resolve(projectDir ?? process.env.MCTEST_PROJECT_DIR ?? process.cwd());
     const gradlew = join(dir, isWindows ? 'gradlew.bat' : 'gradlew');
     if (!existsSync(gradlew)) {
       throw new Error(`No ${isWindows ? 'gradlew.bat' : 'gradlew'} in ${dir}. Pass projectDir (the mod's gradle project) or set MCTEST_PROJECT_DIR.`);
     }
-    const running = this.launched.find((l) => l.side === side && !l.exited);
-    if (running) throw new Error(`A ${side} launched by this session is still running (${running.task}). Close it first (mc_close_all, mc_quit or mc_server_stop).`);
-    try {
-      await this.clients[side].call('status', {}, 3_000, 0);
-      throw new Error('already-running');
-    } catch (e) {
-      if ((e as Error).message === 'already-running') {
-        throw new Error(`A Minecraft ${side} with MCTest is already running on port ${this.clients[side].port}. Use it, or close it (mc_close_all) before launching another.`);
-      }
+    const name = opts.name?.trim() || undefined;
+    if (name && !/^[A-Za-z0-9_]{1,16}$/.test(name)) throw new Error(`Invalid player name "${name}": 1-16 letters, digits or _`);
+    if (name && side === 'server') throw new Error('name only applies to clients');
+    if (name && this.running('client').some((l) => l.name?.toLowerCase() === name.toLowerCase())) {
+      throw new Error(`A client named ${name} launched by this session is still running.`);
+    }
+    // A second client needs its own control port: pick a free one when only a name was given.
+    // Ports of games launched here count as taken even before those games have opened them.
+    const defaultTaken = () => this.running(side).some((l) => l.port === this.defaultPort[side]) || this.portInUse(side, this.defaultPort[side]);
+    const port = opts.port ?? (name && (await defaultTaken()) ? await this.freePort(side) : this.defaultPort[side]);
+    const running = this.running(side).find((l) => l.port === port);
+    if (running) {
+      throw new Error(
+        `A ${side} launched by this session is still running on port ${port} (${running.task}). Close it first (mc_close_all, mc_quit or mc_server_stop)` +
+          (side === 'client' ? ', or launch another client with a name (and/or port).' : '.'),
+      );
+    }
+    if (await this.portInUse(side, port)) {
+      throw new Error(
+        `A Minecraft ${side} with MCTest is already running on port ${port}. Use it, or close it (mc_close_all) before launching another` +
+          (side === 'client' ? ', or pass name (e.g. "Bob") to start an additional client on a free port.' : '.'),
+      );
     }
 
     const fullTask = task ?? `:${loader}:${side === 'client' ? 'runClient' : 'runServer'}`;
     const logDir = join(dir, 'build', 'mctest-logs');
     mkdirSync(logDir, { recursive: true });
-    const log = join(logDir, `${loader}-${side}.log`);
+    const log = join(logDir, `${loader}-${side}${name ? `-${name}` : port !== this.defaultPort[side] ? `-${port}` : ''}.log`);
     const out = createWriteStream(log);
     const gradleArgs = ['--console=plain', fullTask, ...args];
+    // The game reads its port and player name from system properties; JAVA_TOOL_OPTIONS reaches the game JVM that
+    // gradle forks (and works with every MCTest version), the MCTEST_* variables are read by newer ones.
+    const env = { ...process.env };
+    const props: string[] = [];
+    if (port !== this.defaultPort[side]) {
+      env[side === 'client' ? 'MCTEST_PORT' : 'MCTEST_SERVER_PORT'] = String(port);
+      props.push(`-Dmctest.${side === 'client' ? 'port' : 'serverPort'}=${port}`);
+    }
+    if (name) {
+      env.MCTEST_USERNAME = name;
+      props.push(`-Dmctest.username=${name}`);
+    }
+    if (props.length) env.JAVA_TOOL_OPTIONS = [env.JAVA_TOOL_OPTIONS, ...props].filter(Boolean).join(' ');
     const child = isWindows
-      ? spawn('cmd.exe', ['/d', '/s', '/c', gradlew, ...gradleArgs], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-      : spawn(gradlew, gradleArgs, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      ? spawn('cmd.exe', ['/d', '/s', '/c', gradlew, ...gradleArgs], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      : spawn(gradlew, gradleArgs, { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     child.stdout!.pipe(out);
     child.stderr!.pipe(out);
 
-    const entry: Launched = { side, loader, task: fullTask, projectDir: dir, log, startedAt: Date.now(), child, exited: false, exitCode: null };
+    const entry: Launched = { side, port, name, loader, task: fullTask, projectDir: dir, log, startedAt: Date.now(), child, exited: false, exitCode: null };
     child.on('exit', (code) => {
       entry.exited = true;
       entry.exitCode = code;
@@ -152,7 +204,7 @@ export class Launcher {
   private async watchPid(entry: Launched) {
     while (!entry.exited && !entry.gamePid) {
       try {
-        const s = await this.clients[entry.side].call('status', {}, 5_000, 0);
+        const s = await this.clientFor(entry.side, entry.port).call('status', {}, 5_000, 0);
         if (typeof s.pid === 'number') entry.gamePid = s.pid;
         else if (s?.ready) return; // an older MCTest without pid: closeAll falls back to findGameJvms
       } catch {
@@ -163,15 +215,15 @@ export class Launcher {
   }
 
   /** Records the pid reported by any status call (lets external games be killed too). */
-  notePid(side: Side, pid: unknown) {
+  notePid(side: Side, port: number, pid: unknown) {
     if (typeof pid !== 'number') return;
-    const entry = this.launched.find((l) => l.side === side && !l.exited);
+    const entry = this.launched.find((l) => l.side === side && l.port === port && !l.exited);
     if (entry && !entry.gamePid) entry.gamePid = pid;
   }
 
-  /** The launched process for a side, if it died before becoming ready. */
-  failedStart(side: Side): string | undefined {
-    const entry = [...this.launched].reverse().find((l) => l.side === side);
+  /** The launched process for a side and port, if it died before becoming ready. */
+  failedStart(side: Side, port = this.defaultPort[side]): string | undefined {
+    const entry = [...this.launched].reverse().find((l) => l.side === side && l.port === port);
     if (!entry?.exited) return undefined;
     return `The ${side} launched with ${entry.task} exited (code ${entry.exitCode}). Last lines of ${entry.log}:\n${tail(entry.log, 30)}`;
   }
@@ -181,20 +233,59 @@ export class Launcher {
    * and the gradle run that started it. `all` also closes MCTest games this session did not launch.
    */
   async closeAll(all: boolean, graceMs = 60_000): Promise<string[]> {
-    const report: string[] = [];
+    const targets: [Side, number][] = [];
     for (const side of ['client', 'server'] as const) {
-      const client = this.clients[side];
-      const mine = this.launched.filter((l) => l.side === side && (!l.exited || isAlive(l.gamePid)));
+      const ports = new Set([this.defaultPort[side], ...this.running(side).map((l) => l.port)]);
+      if (all && side === 'client') for (const p of await this.scanClients()) ports.add(p);
+      for (const p of ports) targets.push([side, p]);
+    }
+    // All games at once: each may take a while to save its world.
+    const reports = await Promise.all(targets.map(([side, port]) => this.close(side, port, all, graceMs)));
+    return reports.filter((r): r is string => !!r);
+  }
+
+  /** Control ports in the scan range where an MCTest client answers. */
+  async scanClients(): Promise<number[]> {
+    const ports: number[] = [];
+    for (let p = CLIENT_PORT_SCAN.from; p <= CLIENT_PORT_SCAN.to; p++) if (p !== this.defaultPort.server) ports.push(p);
+    const up = await Promise.all(ports.map((p) => this.portInUse('client', p)));
+    return ports.filter((_, i) => up[i]);
+  }
+
+  async portInUse(side: Side, port: number): Promise<boolean> {
+    try {
+      await this.clientFor(side, port).call('status', {}, 3_000, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async freePort(side: Side): Promise<number> {
+    const taken = new Set(this.running(side).map((l) => l.port));
+    for (let p = this.defaultPort[side] + 1; p < this.defaultPort[side] + 100; p++) {
+      if (p === this.defaultPort.server || p === this.defaultPort.client || taken.has(p)) continue;
+      if (!(await this.portInUse(side, p))) return p;
+    }
+    throw new Error('No free MCTest control port found');
+  }
+
+  private async close(side: Side, port: number, all: boolean, graceMs: number): Promise<string | undefined> {
+    {
+      const client = this.clientFor(side, port);
+      const mine = this.launched.filter((l) => l.side === side && l.port === port && (!l.exited || isAlive(l.gamePid)));
       let pid = mine.find((l) => l.gamePid)?.gamePid;
       let reachable = false;
+      let username: string | undefined;
       try {
         const s = await client.call('status', {}, 3_000, 0);
         reachable = true;
         if (typeof s.pid === 'number') pid = s.pid;
+        if (typeof s.username === 'string') username = s.username;
       } catch {
         // not running, or not answering
       }
-      if (!mine.length && !(all && reachable)) continue;
+      if (!mine.length && !(all && reachable)) return undefined;
 
       let how = 'already exited';
       if (reachable) {
@@ -219,9 +310,9 @@ export class Launcher {
         }
         if (!(await waitForExit(l, 15_000))) killTree(l.child.pid);
       }
-      report.push(`${side}${pid ? ` (pid ${pid})` : ''}${mine.length ? ` launched by ${mine.map((l) => l.task).join(', ')}` : ' (not launched by this session)'}: ${how}`);
+      const who = username ?? mine.find((l) => l.name)?.name;
+      return `${side}${who ? ` ${who}` : ''} on port ${port}${pid ? ` (pid ${pid})` : ''}${mine.length ? ` launched by ${mine.map((l) => l.task).join(', ')}` : ' (not launched by this session)'}: ${how}`;
     }
-    return report;
   }
 
   /** Last-resort synchronous cleanup when the MCP process exits: kills whatever launched game is still alive. */

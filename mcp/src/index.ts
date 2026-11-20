@@ -17,7 +17,88 @@ const srv = new MCTestClient(
   'Minecraft dedicated server not reachable at {url} ({error}). Start it with ./gradlew :<loader>:runServer ' +
     '(fabric, neoforge or forge; with MCTest on the runtime classpath), then call mc_server_wait_ready.',
 );
-const launcher = new Launcher({ client: mc, server: srv });
+
+/** One API connection per client control port (several clients can run at once, e.g. for multiplayer tests). */
+const clients = new Map<number, MCTestClient>([[port, mc]]);
+function clientOnPort(p: number): MCTestClient {
+  let c = clients.get(p);
+  if (!c) {
+    c = new MCTestClient(
+      p,
+      `Minecraft client not reachable at {url} ({error}). Start another client with mc_launch {name} (it picks a free port), ` +
+        'or check mc_clients for the running ones.',
+    );
+    clients.set(p, c);
+  }
+  return c;
+}
+function portOf(client: MCTestClient): number {
+  return client.port;
+}
+const launcher = new Launcher((side, p) => (side === 'server' ? (p === serverPort ? srv : new MCTestClient(p)) : clientOnPort(p)), {
+  client: port,
+  server: serverPort,
+});
+
+/** Player name (lower case) -> control port, from mc_launch names and status calls. */
+const namedPorts = new Map<string, number>();
+
+/** Finds the client a tool should drive: by control port, or by player / launch name; the default client otherwise. */
+async function resolveClient(name: string | undefined, p: number | undefined): Promise<MCTestClient> {
+  if (p !== undefined) return clientOnPort(p);
+  if (name === undefined || name === '') return mc;
+  if (/^\d+$/.test(name)) return clientOnPort(Number(name));
+  const key = name.toLowerCase();
+  const launched = launcher.running('client').find((l) => l.name?.toLowerCase() === key);
+  if (launched) return clientOnPort(launched.port);
+  const known = namedPorts.get(key);
+  if (known !== undefined) {
+    try {
+      const s = await clientOnPort(known).call('status', {}, 3_000, 0);
+      if (String(s.username).toLowerCase() === key) return clientOnPort(known);
+    } catch {
+      // gone; scan again
+    }
+    namedPorts.delete(key);
+  }
+  const found = await listClients();
+  const hit = found.find((c) => c.username?.toLowerCase() === key);
+  if (hit) return clientOnPort(hit.port);
+  throw new Error(
+    `No Minecraft client named "${name}". Running clients: ${
+      found.length ? found.map((c) => `${c.username ?? '?'} (port ${c.port})`).join(', ') : 'none'
+    }. Start one with mc_launch {loader, name:"${name}"}.`,
+  );
+}
+
+interface ClientInfo {
+  port: number;
+  username?: string;
+  state?: string;
+  ready?: boolean;
+  pid?: number;
+  launchedBy?: string;
+  name?: string;
+  reachable: boolean;
+}
+
+/** Every MCTest client this session launched or that answers on a port in the scan range. */
+async function listClients(): Promise<ClientInfo[]> {
+  const ports = new Set([port, ...launcher.running('client').map((l) => l.port), ...(await launcher.scanClients())]);
+  const rows = await Promise.all(
+    [...ports].sort((a, b) => a - b).map(async (p): Promise<ClientInfo | undefined> => {
+      const launched = launcher.running('client').find((l) => l.port === p);
+      try {
+        const s = await clientOnPort(p).call('status', {}, 3_000, 0);
+        remember(clientOnPort(p), s);
+        return { port: p, username: s.username, state: s.state, ready: s.ready, pid: s.pid, launchedBy: launched?.task, name: launched?.name, reachable: true };
+      } catch {
+        return launched ? { port: p, launchedBy: launched.task, name: launched.name, reachable: false, state: 'starting (not answering yet)' } : undefined;
+      }
+    }),
+  );
+  return rows.filter((r): r is ClientInfo => !!r);
+}
 
 const INSTRUCTIONS = `Drive a running Minecraft client (Fabric, NeoForge or Forge, with the MCTest mod) like Playwright drives a browser.
 Typical flow: mc_launch {loader} (or use an already running client) -> mc_wait_ready -> mc_world_create (flat:true for a clean test world) -> act -> verify -> mc_screenshot when visuals matter.
@@ -29,6 +110,8 @@ Typical flow: mc_launch {loader} (or use an already running client) -> mc_wait_r
 - Player skills: mc_goto (pathfinding walk), mc_collect (walk + mine visible blocks with the best tool + pick up drops), mc_dig (staircase down / tunnel), mc_place, mc_fight (melee with proper attack cooldowns), mc_craft (recipe book; opens the inventory or walks to a crafting table), mc_select_item, mc_scan_blocks.
 - For survival play, enable mc_lockstep: the world freezes while you think and only runs while an action is in progress, so mobs can't act between your calls.
 - Dedicated server (multiplayer) tests: start the server (mc_server_launch) and the client (mc_launch), mc_server_wait_ready + mc_wait_ready, then mc_connect. The mc_server_* tools talk to the server itself: mc_server_command runs console commands (full permissions), mc_server_players / mc_server_block / mc_server_entities show the authoritative server state, mc_server_wait_for waits on server-side conditions, mc_server_logs reads the server log. Client tools keep driving the player. Compare client and server views to catch sync bugs.
+- Several players: mc_launch {loader, name:"Bob"} starts an extra client as player Bob on its own control port; every client tool takes client:"Bob" (or port) to drive it, mc_clients lists them, mc_close_all closes them all. Without client the main client is used.
+- Timing-sensitive tests: mc_time_freeze / mc_server_time_freeze {full:true} pause the whole server tick (mod tick events and timers too); mc_time_step / mc_server_time_step then advance exact ticks.
 - GameTests: mc_gametest_run {tests:"mymod:*"} runs your mod's GameTests and reports each result (mc_server_gametest_run on a dedicated server).
 - Errors logged by the game are appended to tool results automatically. If the game died, mc_crash_report shows why; mc_quit closes it cleanly.
 - Start games with mc_launch / mc_server_launch rather than running gradle yourself, so they are tracked.
@@ -60,7 +143,8 @@ const errorCursor = new Map<MCTestClient, number>();
 
 function remember(client: MCTestClient, result: any) {
   if (result && typeof result.gameDir === 'string') gameDirs.set(client, result.gameDir);
-  if (result && 'pid' in result) launcher.notePid(client === srv ? 'server' : 'client', result.pid);
+  if (result && 'pid' in result) launcher.notePid(client === srv ? 'server' : 'client', portOf(client), result.pid);
+  if (client !== srv && result && typeof result.username === 'string') namedPorts.set(result.username.toLowerCase(), portOf(client));
 }
 
 /**
@@ -78,13 +162,13 @@ async function newErrors(client: MCTestClient): Promise<Content[]> {
     }
     errorCursor.set(client, r.next);
     if (!r.lines.length) return [];
-    const side = client === srv ? 'server' : 'client';
+    const side = client === srv ? 'server' : clients.size > 1 && client !== mc ? `client on port ${client.port}` : 'client';
     const shown = r.lines.slice(-5).map((l: any) => `[${l.level}] ${l.logger}: ${l.message}${l.exception ? ` -- ${l.exception}` : ''}`);
     const more = r.lines.length > 5 ? ` (newest 5 of ${r.lines.length}${r.lines.length === 20 ? '+' : ''})` : '';
     return [
       {
         type: 'text',
-        text: `New ERROR lines in the ${side} log since the previous call${more}; ${side === 'server' ? 'mc_server_logs' : 'mc_logs'} {level:"ERROR"} has the stacks:\n${shown.join('\n')}`,
+        text: `New ERROR lines in the ${side} log since the previous call${more}; ${side === 'server' ? 'mc_server_logs' : 'mc_logs'} {level:"ERROR"${client !== srv && client !== mc ? `, port:${client.port}` : ''}} has the stacks:\n${shown.join('\n')}`,
       },
     ];
   } catch {
@@ -101,6 +185,16 @@ async function withErrors(client: MCTestClient, result: { content: Content[]; is
 function clean(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
 }
+
+/** Added to every client tool: which client to drive when several run at once. */
+const target = {
+  client: z
+    .string()
+    .optional()
+    .describe('Which Minecraft client to drive: a name given to mc_launch, or the player name of a running client (mc_clients lists them). Default: the main client'),
+  port: z.number().int().optional().describe('Control port of the client to drive (alternative to client)'),
+};
+type Target = { client?: string; port?: number };
 
 /**
  * Registers a tool that forwards its arguments to a mod method. `timeout` derives a client-side timeout from the
@@ -120,14 +214,20 @@ function tool<S extends z.ZodRawShape>(
 ) {
   server.registerTool(
     name,
-    { description, inputSchema: shape, annotations: { readOnlyHint: options.readOnly ?? false, openWorldHint: false } },
-    (async (args: z.infer<z.ZodObject<S>>) => {
-      const client = options.client ?? mc;
+    {
+      description,
+      inputSchema: options.client ? shape : { ...shape, ...target },
+      annotations: { readOnlyHint: options.readOnly ?? false, openWorldHint: false },
+    },
+    (async (allArgs: z.infer<z.ZodObject<S>> & Target) => {
+      const { client: clientName, port: clientPort, ...args } = allArgs as Record<string, unknown> & Target;
+      let client = options.client ?? mc;
       let out: { content: Content[]; isError?: boolean };
       try {
-        const result = await client.call(method, clean(args as Record<string, unknown>), options.timeout?.(args) ?? 60_000);
+        if (!options.client) client = await resolveClient(clientName, clientPort);
+        const result = await client.call(method, clean(args), options.timeout?.(args as z.infer<z.ZodObject<S>>) ?? 60_000);
         remember(client, result);
-        out = text(options.transform ? options.transform(result, args) : result);
+        out = text(options.transform ? options.transform(result, args as z.infer<z.ZodObject<S>>) : result);
       } catch (e) {
         out = errorResult(e);
       }
@@ -165,21 +265,38 @@ server.registerTool(
   {
     description:
       'Wait until the Minecraft client is running and ready for input (polls mc_status; tolerates the game not having started yet). Call this first after launching the game.',
-    inputSchema: { timeoutSeconds: z.number().positive().optional().describe('Give up after this long (default 300)') },
+    inputSchema: { timeoutSeconds: z.number().positive().optional().describe('Give up after this long (default 300)'), ...target },
     annotations: { readOnlyHint: true },
   },
-  async ({ timeoutSeconds }) => {
+  async ({ timeoutSeconds, client: clientName, port: clientPort }) => {
     const deadline = Date.now() + (timeoutSeconds ?? 300) * 1000;
     let last = 'not connected';
     while (Date.now() < deadline) {
-      const died = launcher.failedStart('client');
+      let c: MCTestClient;
+      try {
+        c = await resolveClient(clientName, clientPort);
+      } catch (e) {
+        // A named client that is still starting has no name to find yet.
+        last = (e as Error).message;
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      const died = launcher.failedStart('client', c.port);
       if (died) return errorResult(new Error(died));
       try {
-        const s = await mc.call('status', {}, 10_000, 1_000);
-        remember(mc, s);
+        const s = await c.call('status', {}, 10_000, 1_000);
+        remember(c, s);
         last = `state=${s.state}`;
         if (s.ready) {
-          return text({ ready: true, state: s.state, screen: s.screen?.simpleName ?? null, minecraft: s.minecraftVersion, loader: `${s.loader} ${s.loaderVersion}` });
+          return text({
+            ready: true,
+            state: s.state,
+            screen: s.screen?.simpleName ?? null,
+            player: s.username,
+            port: c.port,
+            minecraft: s.minecraftVersion,
+            loader: `${s.loader} ${s.loaderVersion}`,
+          });
         }
       } catch (e) {
         last = (e as Error).message;
@@ -238,12 +355,13 @@ server.registerTool(
       side: z.enum(['client', 'server']).optional().describe('Default client'),
       gameDir: z.string().optional().describe('Game directory (e.g. <mod>/fabric/runs/client); only needed if MCTest never reported it in this session'),
       maxLines: z.number().int().positive().optional().describe('Default 150'),
+      ...target,
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ side, gameDir, maxLines }) => {
+  async ({ side, gameDir, maxLines, client: clientName, port: clientPort }) => {
     try {
-      const client = side === 'server' ? srv : mc;
+      const client = side === 'server' ? srv : clientPort !== undefined ? clientOnPort(clientPort) : await resolveClient(clientName, undefined).catch(() => mc);
       let dir = gameDir ?? gameDirs.get(client);
       if (!dir) {
         const s = await client.call('status', {}, 5_000, 0);
@@ -323,11 +441,14 @@ server.registerTool(
     inputSchema: {
       name: z.string().optional().describe('File name (letters, digits, . _ -); default is a timestamp'),
       maxSize: z.number().int().min(64).max(4096).optional().describe('Longest side of the returned image in pixels (default 1280; the PNG on disk is always full size)'),
+      ...target,
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ name, maxSize }) => {
+  async ({ name, maxSize, client: clientName, port: clientPort }) => {
+    let mc: MCTestClient | undefined;
     try {
+      mc = await resolveClient(clientName, clientPort);
       const r = await mc.call('screenshot', clean({ name, maxSize, inline: true }));
       const { inline, ...info } = r;
       // Older mods without inline support: fall back to the PNG file.
@@ -376,7 +497,7 @@ tool(
 tool(
   'mc_player',
   'player',
-  'Local player: position, rotation, velocity, dimension, gamemode, health, food, xp, what the crosshair targets, inventory (slot numbers: 0-8 hotbar, 9-35 main, 36+ armor/offhand), effects and attributes.',
+  'Local player: position, rotation, velocity, dimension, gamemode, health, food, xp, movement/hazard state (gliding, vehicle, passengers, onFire, fireTicks, air, frozenTicks, inWater, swimming, sleeping, fallDistance), what the crosshair targets, inventory (slot numbers: 0-8 hotbar, 9-35 main, 36+ armor/offhand), effects and attributes.',
   {},
   { readOnly: true },
 );
@@ -579,13 +700,24 @@ tool('mc_reload_resources', 'reloadResources', 'Reload resource packs (like F3+T
 
 // ---------------------------------------------------------------- time control (singleplayer)
 
-tool('mc_time_status', 'time.status', 'Whether the world is frozen / in lockstep, and the current game time.', {}, { readOnly: true });
-tool('mc_time_freeze', 'time.freeze', 'Freeze the world (like /tick freeze, but no cheats needed): mobs, blocks, crops, fluids stop; the player can still act.', {});
-tool('mc_time_unfreeze', 'time.unfreeze', 'Unfreeze the world (also turns lockstep off).', {});
+const fullFreeze = z
+  .boolean()
+  .optional()
+  .describe(
+    'Pause the whole server tick instead (default false): nothing ticks at all, including players and every mod\'s server tick events, so mod timers and countdowns stop too. Packets are still handled and clients stay connected; mc_time_step then runs exact whole server ticks',
+  );
+tool('mc_time_status', 'time.status', 'Whether the world is frozen (fullFreeze = whole server tick paused) / in lockstep, the current game time and server tick count.', {}, { readOnly: true });
+tool(
+  'mc_time_freeze',
+  'time.freeze',
+  'Freeze the world (like /tick freeze, but no cheats needed): mobs, blocks, crops, fluids stop; the player can still act. Mod code that runs on server tick events keeps running unless full:true.',
+  { full: fullFreeze },
+);
+tool('mc_time_unfreeze', 'time.unfreeze', 'Unfreeze the world, from either kind of freeze (also turns lockstep off).', {});
 tool(
   'mc_time_step',
   'time.step',
-  'Advance a frozen world by exactly N ticks, then wait for it to finish.',
+  'Advance a frozen world by exactly N ticks, then wait for it to finish. After a full freeze, steps whole server ticks (mod tick events included).',
   { ticks: z.number().int().positive() },
   { timeout: (a) => ticksTimeout(a.ticks, 1) },
 );
@@ -745,7 +877,7 @@ tool(
   { ...serverOpts, timeout: (a) => ticksTimeout(a.ticks, 0) },
 );
 
-tool('mc_server_players', 'players', 'Players on the dedicated server as the server sees them: name, uuid, op, ping, position, dimension, gamemode, health, food, xp, inventory, open menu class, effects.', {}, {
+tool('mc_server_players', 'players', 'Players on the dedicated server as the server sees them: name, uuid, op, ping, position, velocity, dimension, gamemode, health, food, xp, movement/hazard state (gliding, vehicle, passengers, onFire, fireTicks, air, frozenTicks, inWater, swimming, sleeping, fallDistance), inventory, open menu class, effects.', {}, {
   ...serverOpts,
   readOnly: true,
 });
@@ -799,13 +931,25 @@ tool(
   { ...serverOpts, readOnly: true },
 );
 
-tool('mc_server_time_status', 'time.status', 'Whether the dedicated server is frozen or stepping, its tick rate and game time.', {}, { ...serverOpts, readOnly: true });
-tool('mc_server_time_freeze', 'time.freeze', "Freeze the dedicated server's worlds (like /tick freeze): mobs, blocks, crops, fluids stop; players can still move.", {}, serverOpts);
-tool('mc_server_time_unfreeze', 'time.unfreeze', "Unfreeze the dedicated server's worlds.", {}, serverOpts);
+tool(
+  'mc_server_time_status',
+  'time.status',
+  'Whether the dedicated server is frozen (fullFreeze = whole server tick paused) or stepping, its tick rate, game time and server tick count.',
+  {},
+  { ...serverOpts, readOnly: true },
+);
+tool(
+  'mc_server_time_freeze',
+  'time.freeze',
+  "Freeze the dedicated server's worlds (like /tick freeze): mobs, blocks, crops, fluids stop; players can still move. Mod code on server tick events keeps running unless full:true.",
+  { full: fullFreeze },
+  serverOpts,
+);
+tool('mc_server_time_unfreeze', 'time.unfreeze', "Unfreeze the dedicated server, from either kind of freeze.", {}, serverOpts);
 tool(
   'mc_server_time_step',
   'time.step',
-  'Advance a frozen dedicated server by exactly N ticks and wait until done.',
+  'Advance a frozen dedicated server by exactly N ticks and wait until done. After a full freeze, steps whole server ticks (mod tick events included).',
   { ticks: z.number().int().positive().describe('Ticks to advance') },
   { ...serverOpts, timeout: (a) => ticksTimeout(a.ticks, 1) },
 );
@@ -856,20 +1000,45 @@ const launchShape = {
   args: z.array(z.string()).optional().describe('Extra gradle arguments'),
 };
 
+const clientLaunchShape = {
+  ...launchShape,
+  name: z
+    .string()
+    .optional()
+    .describe(
+      'Player name for this client, e.g. "Bob" (letters, digits, _). Lets you start several clients for multiplayer tests: each named client gets its own control port, and every client tool takes client:"Bob" to drive it',
+    ),
+  port: z.number().int().optional().describe('Control port for this client (default: 25599, or a free port when name is given and 25599 is taken)'),
+};
+
 function registerLaunch(name: string, side: Side, waitTool: string) {
   server.registerTool(
     name,
     {
       description:
         `Start a Minecraft ${side === 'client' ? 'client' : 'dedicated server'} with gradle (./gradlew :<loader>:${side === 'client' ? 'runClient' : 'runServer'}) and track it, so mc_close_all ` +
-        `(and the end of this MCP session) closes it again. Returns right away; then call ${waitTool}. Gradle output goes to <projectDir>/build/mctest-logs/.`,
-      inputSchema: launchShape,
+        `(and the end of this MCP session) closes it again. Returns right away; then call ${waitTool}. Gradle output goes to <projectDir>/build/mctest-logs/.` +
+        (side === 'client'
+          ? ' For multiplayer tests launch more clients with a name each (mc_launch {loader, name:"Bob"}), then pass client:"Bob" to any client tool.'
+          : ''),
+      inputSchema: side === 'client' ? clientLaunchShape : launchShape,
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    async ({ loader, projectDir, task, args }) => {
+    async ({ loader, projectDir, task, args, name: playerName, port: wantedPort }: z.infer<z.ZodObject<typeof clientLaunchShape>>) => {
       try {
-        const l = await launcher.launch(side, loader, projectDir, task, args ?? []);
-        return text({ launched: l.task, side, projectDir: l.projectDir, log: l.log, next: `call ${waitTool}`, reminder: 'call mc_close_all when testing is done' });
+        const l = await launcher.launch(side, loader, projectDir, task, args ?? [], { name: playerName, port: wantedPort });
+        if (l.name) namedPorts.set(l.name.toLowerCase(), l.port);
+        const select = side === 'client' && l.port !== port ? (l.name ? { client: l.name } : { port: l.port }) : undefined;
+        return text({
+          launched: l.task,
+          side,
+          ...(side === 'client' ? { player: l.name ?? '(dev default)', port: l.port } : {}),
+          projectDir: l.projectDir,
+          log: l.log,
+          next: `call ${waitTool}${select ? ` ${JSON.stringify(select)}` : ''}`,
+          ...(select ? { select: `pass ${JSON.stringify(select)} to client tools to drive this client` } : {}),
+          reminder: 'call mc_close_all when testing is done',
+        });
       } catch (e) {
         return errorResult(e);
       }
@@ -883,7 +1052,7 @@ server.registerTool(
   'mc_close_all',
   {
     description:
-      'Close every Minecraft client and dedicated server: quits them through MCTest (worlds are saved), waits for them to exit and kills any that hang, ' +
+      'Close every Minecraft client (all of them, also extra named clients and clients on other control ports) and the dedicated server: quits them through MCTest (worlds are saved), waits for them to exit and kills any that hang, ' +
       'plus the gradle runs that started them. Call this whenever you have finished testing, also after a failed test.',
     inputSchema: {
       all: z.boolean().optional().describe('Also close MCTest games this session did not launch itself (default true)'),
@@ -901,17 +1070,36 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'mc_clients',
+  {
+    description:
+      'List the Minecraft clients with MCTest: the ones this session launched and any answering on control ports 25599-25619. Shows player name, control port, state and pid. Pass client:"<name>" (or port) to client tools to drive a specific one.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  async () => {
+    try {
+      const list = await listClients();
+      return text({ clients: list.map((c) => ({ ...c, default: c.port === port })) });
+    } catch (e) {
+      return errorResult(e);
+    }
+  },
+);
+
 // ---------------------------------------------------------------- escape hatch
 
 server.registerTool(
   'mc_call',
   {
     description: 'Call any MCTest method directly with raw params (for methods without a dedicated tool).',
-    inputSchema: { method: z.string(), params: z.record(z.string(), z.unknown()).optional(), timeoutMs: z.number().int().positive().optional() },
+    inputSchema: { method: z.string(), params: z.record(z.string(), z.unknown()).optional(), timeoutMs: z.number().int().positive().optional(), ...target },
   },
-  async ({ method, params, timeoutMs }) => {
+  async ({ method, params, timeoutMs, client: clientName, port: clientPort }) => {
     try {
-      return withErrors(mc, text(await mc.call(method, params ?? {}, timeoutMs ?? 60_000)));
+      const c = await resolveClient(clientName, clientPort);
+      return withErrors(c, text(await c.call(method, params ?? {}, timeoutMs ?? 60_000)));
     } catch (e) {
       return errorResult(e);
     }
