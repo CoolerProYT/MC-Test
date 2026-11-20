@@ -55,6 +55,8 @@ public final class StatusMethods {
         out.addProperty("ready", !state.equals("loading") && !state.equals("joining"));
         out.add("screen", describeScreen(screen));
         out.addProperty("overlay", mc.getOverlay() == null ? null : mc.getOverlay().getClass().getName());
+        out.addProperty("username", mc.getUser().getName());
+        out.addProperty("controlPort", com.coolerpromc.mctest.server.ControlServer.configuredPort());
         out.addProperty("singleplayer", mc.isLocalServer());
         out.addProperty("windowFocused", mc.getWindow().isFocused());
         out.addProperty("mouseGrabbed", mc.mouseHandler.isMouseGrabbed());

@@ -4,6 +4,9 @@ Each MCP tool `mc_*` wraps one method of the mod's WebSocket API (the Method col
 same thing over the [raw protocol](/reference/protocol). Coordinates in GUI tools are **GUI-scaled**, as
 `mc_snapshot` reports them. 20 ticks = 1 second.
 
+Every client tool also takes `client` (a name given to `mc_launch`, or a player name from `mc_clients`) or `port`,
+to drive one of several clients. Without it, tools drive the main client (control port 25599).
+
 <!-- Generated from the tool table in the repository README. -->
 
 ## Lifecycle and worlds
@@ -19,8 +22,9 @@ same thing over the [raw protocol](/reference/protocol). Coordinates in GUI tool
 | `mc_world_delete` | `world.delete {name}` | Delete a world (not the open one) |
 | `mc_connect` | `connect {address?}` | Join a multiplayer server and wait until in-world; fails with the disconnect reason |
 | `mc_quit` | `quit` | Quit the game cleanly (saves first), e.g. to restart after rebuilding your mod |
-| `mc_launch` | (runs gradle) | Start `./gradlew :<loader>:runClient` and track it; then `mc_wait_ready` |
-| `mc_close_all` | `quit` / `stop`, then kill | Close every client and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
+| `mc_launch` | (runs gradle) | Start `./gradlew :<loader>:runClient` and track it; then `mc_wait_ready`. `name` (e.g. `"Bob"`) starts an extra client as that player on its own control port |
+| `mc_clients` | `status` per port | List the running MCTest clients (player name, control port, state, pid) |
+| `mc_close_all` | `quit` / `stop`, then kill | Close every client (extra named clients too) and dedicated server (saves first, kills any that hang). Call it when testing is done; games launched by the MCP server are also closed when its session ends |
 | `mc_crash_report` | (reads files) | Newest crash report or JVM `hs_err` log of the client or server, also after the game has died |
 
 ## Observing
@@ -30,7 +34,7 @@ same thing over the [raw protocol](/reference/protocol). Coordinates in GUI tool
 | `mc_screenshot` | `screenshot {name?,maxSize?}` | Saves a full-size PNG to `<gameDir>/mctest/screenshots/`; returns the path and the image scaled to fit `maxSize` (default 1280) as JPEG, so large windows arrive intact |
 | `mc_window_resize` | `window.resize {width,height}` | Resize the game window (leaves fullscreen); returns size and GUI scale |
 | `mc_snapshot` | `snapshot` | Screen class/title, widgets (`index:Class:text` id, type, text, x/y/w/h, active, focused, visible, values), container slots (menu index, item, count, components, x/y), carried stack |
-| `mc_player` | `player` | Position, rotation, dimension, gamemode, health, food, xp, crosshair target, inventory, effects, attributes |
+| `mc_player` | `player` | Position, rotation, dimension, gamemode, health, food, xp, gliding, vehicle, passengers, fire ticks, air, freeze ticks, water/lava, crosshair target, inventory, effects, attributes |
 | `mc_block` | `block {x,y,z,source?}` | Block id, state properties, block-entity NBT (from the integrated server in singleplayer) |
 | `mc_entities` | `entities {radius?,type?,limit?}` | Nearby entities with ids, types, names, health, item stacks |
 | `mc_scan_blocks` | `scanBlocks {radius?, blocks?}` | Block types around you with counts and nearest positions (ids or `#tags`) |
@@ -84,7 +88,7 @@ same thing over the [raw protocol](/reference/protocol). Coordinates in GUI tool
 
 | Tool | Method | What it does |
 |---|---|---|
-| `mc_time_freeze` / `mc_time_unfreeze` | `time.freeze` / `time.unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act |
+| `mc_time_freeze` / `mc_time_unfreeze` | `time.freeze` / `time.unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act. `full: true` pauses the whole server tick instead, mod tick events and timers included |
 | `mc_time_step` | `time.step {ticks}` | Advance a frozen world by exactly N ticks |
 | `mc_lockstep` | `time.lockstep {enabled}` | The world only runs while an MCTest action is in progress, so nothing happens while the agent is thinking |
 | `mc_time_status` | `time.status` | Frozen / lockstep state and game time |

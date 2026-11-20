@@ -35,7 +35,7 @@ that:
 | Tool | What it does |
 |---|---|
 | `mc_lockstep {enabled}` | The world only runs while an MCTest action is in progress, so nothing happens while the agent thinks |
-| `mc_time_freeze` / `mc_time_unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act |
+| `mc_time_freeze` / `mc_time_unfreeze` | Freeze the world (like `/tick freeze`, no cheats needed); the player can still act. `full: true` pauses the whole server tick (mod timers too) |
 | `mc_time_step {ticks}` | Advance a frozen world by exactly N ticks |
 | `mc_time_status` | Frozen / lockstep state and game time |
 

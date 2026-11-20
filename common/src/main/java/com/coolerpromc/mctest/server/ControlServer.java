@@ -35,7 +35,17 @@ public final class ControlServer {
     }
 
     public static int configuredPort() {
-        return Integer.getInteger("mctest.port", DEFAULT_PORT);
+        Integer port = Integer.getInteger("mctest.port");
+        if (port != null) {
+            return port;
+        }
+        // Lets a launcher (e.g. the MCTest MCP's mc_launch) pick the port through the environment of the gradle run.
+        try {
+            String env = System.getenv("MCTEST_PORT");
+            return env == null || env.isBlank() ? DEFAULT_PORT : Integer.parseInt(env.trim());
+        } catch (NumberFormatException e) {
+            return DEFAULT_PORT;
+        }
     }
 
     public static int configuredServerPort() {
