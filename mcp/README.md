@@ -17,7 +17,7 @@ repositories {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.3") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-fabric-26.3:26.3.0.4") { transitive = false }
 }
 ```
 
@@ -34,7 +34,7 @@ configurations {
 }
 
 dependencies {
-    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.3") { transitive = false }
+    localRuntime("com.coolerpromc.mctest:mctest-neoforge-26.3:26.3.0.4") { transitive = false }
 }
 ```
 
