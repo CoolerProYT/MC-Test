@@ -3,8 +3,12 @@
   "minVersion": "0.8",
   "package": "com.coolerpromc.mctest.mixin",
   "compatibilityLevel": "JAVA_25",
-  "mixins": [],
+  "mixins": [
+    "MinecraftServerTickMixin",
+    "ServerCommonPacketListenerInvoker"
+  ],
   "client": [
+    "ClientMainMixin",
     "AbstractContainerScreenAccessor",
     "ChatComponentMixin",
     "MinecraftMixin",

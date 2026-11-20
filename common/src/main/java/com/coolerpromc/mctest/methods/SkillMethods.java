@@ -7,6 +7,7 @@ import com.coolerpromc.mctest.rpc.ClientThread;
 import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
 import com.coolerpromc.mctest.rpc.RpcRegistry;
+import com.coolerpromc.mctest.tick.ServerFreeze;
 import com.coolerpromc.mctest.tick.TickScheduler;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -80,8 +81,11 @@ public final class SkillMethods {
     public static void register() {
         // ---- time ----
         RpcRegistry.register("time.status", params -> ClientThread.call(SkillMethods::timeStatus));
-        RpcRegistry.register("time.freeze", params -> ClientThread.callAsync(() -> setFrozen(true)));
-        RpcRegistry.register("time.unfreeze", params -> ClientThread.callAsync(() -> setFrozen(false)));
+        RpcRegistry.register("time.freeze", params -> {
+            boolean full = Params.bool(params, "full", false);
+            return ClientThread.callAsync(() -> setFrozen(true, full));
+        });
+        RpcRegistry.register("time.unfreeze", params -> ClientThread.callAsync(() -> setFrozen(false, false)));
         RpcRegistry.register("time.step", params -> {
             int ticks = Math.max(1, Params.integer(params, "ticks", 1));
             return ClientThread.callAsync(() -> step(ticks));
@@ -200,11 +204,17 @@ public final class SkillMethods {
     }
 
     /** Completes once the server has applied the change and the client has had a tick to receive it. */
-    private static CompletableFuture<JsonElement> setFrozen(boolean frozen) {
+    private static CompletableFuture<JsonElement> setFrozen(boolean frozen, boolean full) {
         lockstep = false;
         MinecraftServer server = server();
         return server.submit(() -> {
-                    server.tickRateManager().setFrozen(frozen);
+                    if (full) {
+                        // The whole server tick stops (mod tick events and timers too); the vanilla freeze is left as is.
+                        ServerFreeze.set(server, true);
+                    } else {
+                        if (!frozen) ServerFreeze.set(server, false);
+                        server.tickRateManager().setFrozen(frozen);
+                    }
                     return true;
                 })
                 .thenCompose(v -> ClientThread.callAsync(() -> waitTicks(2)))
@@ -215,11 +225,13 @@ public final class SkillMethods {
         MinecraftServer server = server();
         ServerTickRateManager trm = server.tickRateManager();
         JsonObject out = new JsonObject();
-        out.addProperty("frozen", trm.isFrozen());
+        out.addProperty("frozen", trm.isFrozen() || ServerFreeze.isFrozen(server));
+        out.addProperty("fullFreeze", ServerFreeze.isFrozen(server));
         out.addProperty("lockstep", lockstep);
-        out.addProperty("stepping", trm.isSteppingForward());
+        out.addProperty("stepping", trm.isSteppingForward() || ServerFreeze.isStepping(server));
         out.addProperty("tickRate", trm.tickrate());
         out.addProperty("gameTime", server.overworld().getGameTime());
+        out.addProperty("serverTick", server.getTickCount());
         return out;
     }
 
@@ -237,6 +249,17 @@ public final class SkillMethods {
                 return true;
             });
             return future;
+        }
+        if (ServerFreeze.isFrozen(server)) {
+            return server.submit(() -> ServerFreeze.step(server, ticks))
+                    .thenCompose(f -> f)
+                    .thenCompose(ran -> ClientThread.call(() -> {
+                        JsonObject out = stepResult(server, start);
+                        out.addProperty("steppedTicks", ran);
+                        out.addProperty("gameTimeAdvanced", server.overworld().getGameTime() - start);
+                        out.addProperty("serverTick", server.getTickCount());
+                        return (JsonElement) out;
+                    }));
         }
         if (!server.tickRateManager().isFrozen()) {
             throw new RpcException("The world is not frozen; call time.freeze first (or use waitFor ticks:n)");

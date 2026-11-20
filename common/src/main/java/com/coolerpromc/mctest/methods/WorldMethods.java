@@ -7,6 +7,7 @@ import com.coolerpromc.mctest.rpc.RpcException;
 import com.coolerpromc.mctest.rpc.RpcRegistry;
 import com.coolerpromc.mctest.tick.TickScheduler;
 import com.coolerpromc.mctest.util.Describe;
+import net.minecraft.server.level.ServerPlayer;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -161,6 +162,15 @@ public final class WorldMethods {
         out.addProperty("onGround", p.onGround());
         out.addProperty("sprinting", p.isSprinting());
         out.addProperty("crouching", p.isCrouching());
+        Describe.condition(out, p);
+        // Fire ticks are not synced to clients; in singleplayer read the server's player (the value that burns).
+        MinecraftServer local = mc.getSingleplayerServer();
+        ServerPlayer serverPlayer = local == null ? null : local.getPlayerList().getPlayer(p.getUUID());
+        if (serverPlayer != null) {
+            out.addProperty("fireTicks", serverPlayer.getRemainingFireTicks());
+        } else {
+            out.add("fireTicks", null);
+        }
         out.add("lookingAt", hitResult(mc.hitResult));
 
         Inventory inv = p.getInventory();

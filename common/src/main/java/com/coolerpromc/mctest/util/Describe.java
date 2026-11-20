@@ -143,4 +143,50 @@ public final class Describe {
         }
         return o;
     }
+
+    /**
+     * Movement and hazard state of an entity, added to {@code out}: gliding (elytra), vehicle and passengers, fire,
+     * air, powder-snow freezing, water/lava, swimming, sleeping, fall distance. {@code fireTicks} is the entity's own
+     * counter; on a client it is not synced (only {@code onFire} is), so callers may override it.
+     */
+    public static void condition(JsonObject out, Entity e) {
+        out.addProperty("sneaking", e.isShiftKeyDown());
+        out.addProperty("swimming", e.isSwimming());
+        out.addProperty("inWater", e.isInWater());
+        out.addProperty("underWater", e.isUnderWater());
+        out.addProperty("inLava", e.isInLava());
+        out.addProperty("fallDistance", e.fallDistance);
+        out.addProperty("onFire", e.isOnFire());
+        out.addProperty("fireTicks", e.getRemainingFireTicks());
+        out.addProperty("air", e.getAirSupply());
+        out.addProperty("maxAir", e.getMaxAirSupply());
+        out.addProperty("frozenTicks", e.getTicksFrozen());
+        out.addProperty("ticksToFreeze", e.getTicksRequiredToFreeze());
+        out.addProperty("fullyFrozen", e.isFullyFrozen());
+        if (e instanceof LivingEntity living) {
+            out.addProperty("gliding", living.isFallFlying());
+            out.addProperty("sleeping", living.isSleeping());
+        }
+        Entity vehicle = e.getVehicle();
+        if (vehicle == null) {
+            out.add("vehicle", null);
+        } else {
+            JsonObject v = new JsonObject();
+            v.addProperty("id", vehicle.getId());
+            v.addProperty("uuid", vehicle.getUUID().toString());
+            v.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(vehicle.getType()).toString());
+            v.addProperty("name", vehicle.getName().getString());
+            v.add("pos", vec(vehicle.position()));
+            out.add("vehicle", v);
+        }
+        JsonArray passengers = new JsonArray();
+        for (Entity passenger : e.getPassengers()) {
+            JsonObject o = new JsonObject();
+            o.addProperty("id", passenger.getId());
+            o.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(passenger.getType()).toString());
+            o.addProperty("name", passenger.getName().getString());
+            passengers.add(o);
+        }
+        out.add("passengers", passengers);
+    }
 }

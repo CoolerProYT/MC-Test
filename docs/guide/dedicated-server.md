@@ -33,6 +33,29 @@ In a development environment MCTest makes a dev server usable by dev clients:
 - **Auto-op.** Players are opped when they join, so `mc_command` works from the client. A test that deops a player is
   respected until they rejoin. Turn off with `-Dmctest.autoOp=false` for permission tests.
 
+## Several players
+
+`mc_launch {loader, name: "Bob"}` starts another client that plays as Bob, on its own control port (the next free one
+after 25599). Every client tool takes `client: "Bob"` (or `port`) to drive that client; without it, tools drive the
+main client. `mc_clients` lists the running clients, and `mc_close_all` closes all of them.
+
+```
+mc_server_launch → mc_launch {loader:"fabric"} → mc_launch {loader:"fabric", name:"Bob"}
+→ mc_server_wait_ready → mc_wait_ready → mc_wait_ready {client:"Bob"}
+→ mc_connect → mc_connect {client:"Bob"} → mc_use_item {client:"Bob"} → mc_server_players
+```
+
+The name comes from `-Dmctest.username` (or the `MCTEST_USERNAME` environment variable) and the port from
+`-Dmctest.port` (or `MCTEST_PORT`), so clients started some other way can be set up the same way.
+
+## Freezing the whole server
+
+`mc_server_time_freeze` works like `/tick freeze`: the worlds stop, but the server still ticks, so code on server tick
+events (a mod's countdown, say) keeps running. `mc_server_time_freeze {full: true}` pauses the whole server tick
+instead. Nothing ticks, players and every mod's tick events included. Packets are still handled and keep-alives are
+still sent, so clients stay connected. `mc_server_time_step {ticks: n}` then runs exactly `n` whole server ticks, and
+`mc_server_time_unfreeze` resumes. In singleplayer, `mc_time_freeze {full: true}` does the same to the integrated server.
+
 The server API is not started in the integrated server: in singleplayer the client API already reads the integrated
 server directly (`mc_block`, `mc_time_*`).
 

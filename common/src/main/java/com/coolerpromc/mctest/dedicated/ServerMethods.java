@@ -7,6 +7,7 @@ import com.coolerpromc.mctest.rpc.Params;
 import com.coolerpromc.mctest.rpc.RpcException;
 import com.coolerpromc.mctest.rpc.RpcRegistry;
 import com.coolerpromc.mctest.server.ControlServer;
+import com.coolerpromc.mctest.tick.ServerFreeze;
 import com.coolerpromc.mctest.tick.TickScheduler;
 import com.coolerpromc.mctest.util.Describe;
 import com.google.gson.JsonArray;
@@ -91,12 +92,22 @@ public final class ServerMethods {
             return ServerThread.callAsync(() -> waitFor(condition, check, finalTimeout));
         });
         RpcRegistry.register("time.status", params -> ServerThread.call(ServerMethods::timeStatus));
-        RpcRegistry.register("time.freeze", params -> ServerThread.call(() -> {
-            ServerThread.server().tickRateManager().setFrozen(true);
-            return timeStatus();
-        }));
+        RpcRegistry.register("time.freeze", params -> {
+            boolean full = Params.bool(params, "full", false);
+            return ServerThread.call(() -> {
+                MinecraftServer server = ServerThread.server();
+                if (full) {
+                    ServerFreeze.set(server, true);
+                } else {
+                    server.tickRateManager().setFrozen(true);
+                }
+                return timeStatus();
+            });
+        });
         RpcRegistry.register("time.unfreeze", params -> ServerThread.call(() -> {
-            ServerThread.server().tickRateManager().setFrozen(false);
+            MinecraftServer server = ServerThread.server();
+            ServerFreeze.set(server, false);
+            server.tickRateManager().setFrozen(false);
             return timeStatus();
         }));
         RpcRegistry.register("time.step", params -> {
@@ -245,6 +256,9 @@ public final class ServerMethods {
         out.addProperty("saturation", p.getFoodData().getSaturationLevel());
         out.addProperty("xpLevel", p.experienceLevel);
         out.addProperty("onGround", p.onGround());
+        out.addProperty("sprinting", p.isSprinting());
+        out.add("velocity", Describe.vec(p.getDeltaMovement()));
+        Describe.condition(out, p);
 
         Inventory inv = p.getInventory();
         out.addProperty("selectedSlot", inv.getSelectedSlot());
@@ -450,16 +464,29 @@ public final class ServerMethods {
         MinecraftServer server = ServerThread.server();
         ServerTickRateManager trm = server.tickRateManager();
         JsonObject out = new JsonObject();
-        out.addProperty("frozen", trm.isFrozen());
-        out.addProperty("stepping", trm.isSteppingForward());
+        out.addProperty("frozen", trm.isFrozen() || ServerFreeze.isFrozen(server));
+        out.addProperty("fullFreeze", ServerFreeze.isFrozen(server));
+        out.addProperty("stepping", trm.isSteppingForward() || ServerFreeze.isStepping(server));
         out.addProperty("tickRate", trm.tickrate());
         out.addProperty("gameTime", server.overworld().getGameTime());
+        out.addProperty("serverTick", server.getTickCount());
         return out;
     }
 
     private static CompletableFuture<JsonElement> step(int ticks) {
         MinecraftServer server = ServerThread.server();
         ServerTickRateManager trm = server.tickRateManager();
+        if (ServerFreeze.isFrozen(server)) {
+            long startTime = server.overworld().getGameTime();
+            return ServerFreeze.step(server, ticks).thenApply(ran -> {
+                JsonObject out = new JsonObject();
+                out.addProperty("steppedTicks", ran);
+                out.addProperty("gameTime", server.overworld().getGameTime());
+                out.addProperty("gameTimeAdvanced", server.overworld().getGameTime() - startTime);
+                out.addProperty("serverTick", server.getTickCount());
+                return out;
+            });
+        }
         if (!trm.isFrozen()) {
             throw new RpcException("The server is not frozen; call time.freeze first (or use waitFor ticks:n)");
         }
