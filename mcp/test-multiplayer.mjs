@@ -94,9 +94,14 @@ try {
 
   await check('player fields: vehicle, frozenTicks, air, fire, gliding', async () => {
     await ok('mc_server_command', { command: 'gamemode survival Bob' });
-    await ok('mc_server_command', { command: 'execute at Bob run summon pig ~ ~ ~ {Tags:["mt_ride"],NoAI:1b}' });
-    await ok('mc_server_command', { command: 'ride Bob mount @e[tag=mt_ride,limit=1]' });
+    // On a glass platform high above spawn, so the terrain cannot get in the way.
+    await ok('mc_server_command', { command: 'kill @e[tag=mt_ride]' });
+    await ok('mc_server_command', { command: 'fill 45 100 45 47 100 47 glass' });
+    await ok('mc_server_command', { command: 'tp Bob 46.5 101 46.5' });
+    await ok('mc_server_command', { command: 'summon pig 46.5 101 46.5 {Tags:["mt_ride"],NoAI:1b}' });
+    const ride = await ok('mc_server_command', { command: 'execute at Bob run ride Bob mount @e[tag=mt_ride,limit=1,sort=nearest]' });
     await ok('mc_server_wait_for', { condition: 'ticks:5' });
+    console.log('    ride:', JSON.stringify(ride.output ?? ride));
     let first = (await ok('mc_server_players')).players.find((p) => p.name === 'Bob');
     for (const k of ['gliding', 'vehicle', 'fireTicks', 'onFire', 'air', 'maxAir', 'frozenTicks', 'fullyFrozen', 'passengers', 'sleeping', 'swimming']) {
       assert(k in first, `server players lacks ${k}`);
@@ -129,6 +134,7 @@ try {
     const fire = sp.fireTicks;
     const onFire = sp.onFire;
     await ok('mc_server_command', { command: 'fill 50 100 50 52 104 52 air' });
+    await ok('mc_server_command', { command: 'fill 45 100 45 47 100 47 air' });
     await ok('mc_server_command', { command: 'effect give Bob fire_resistance 30 0 true' });
     await ok('mc_server_command', { command: 'gamemode creative Bob' });
     assert(underWater && air < sp.maxAir, `air ${air} underWater ${underWater}`);
